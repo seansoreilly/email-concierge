@@ -1,0 +1,3 @@
+cognito_user_email  = "you@example.com"
+anthropic_api_key   = "sk-ant-..."
+openrouter_api_key  = "sk-or-..."

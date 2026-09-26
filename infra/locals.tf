@@ -1,0 +1,29 @@
+locals {
+  name_prefix = var.project_name
+
+  lambda_names = {
+    poll  = "${local.name_prefix}-poll-lambda"
+    draft = "${local.name_prefix}-draft-lambda"
+    api   = "${local.name_prefix}-api-lambda"
+  }
+
+  dynamodb_table_names = {
+    emails     = "${local.name_prefix}-emails"
+    sync_state = "${local.name_prefix}-sync-state"
+  }
+
+  secret_names = {
+    gmail_oauth = "${local.name_prefix}/gmail-oauth"
+  }
+
+  lambda_runtime = "nodejs22.x"
+  lambda_handler = "index.handler"
+
+  # Each Lambda's package.json "build" script must emit exactly this path via esbuild -
+  # infra's data.archive_file zips it, so the path is a hard contract between infra/ and services/.
+  lambda_dist_path = {
+    poll  = "${path.module}/../services/poll-lambda/dist/index.mjs"
+    draft = "${path.module}/../services/draft-lambda/dist/index.mjs"
+    api   = "${path.module}/../services/api-lambda/dist/index.mjs"
+  }
+}

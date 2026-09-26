@@ -160,6 +160,10 @@ scripts/
   deploy-web.sh       manual Amplify deployment (build → zip → upload → start-deployment)
 ```
 
+**Reproducing the demo on a fresh clone**: the live table is already seeded, but `pnpm seed`
+(reads `EMAILS_TABLE_NAME`, defaults to the live table name) loads the 13 fixtures into DynamoDB
+so the review queue isn't empty — no live Gmail connection required for this step.
+
 ## Finishing setup (the one step only you can do)
 
 Everything in this repo is built, deployed, and verified except live Gmail access — that

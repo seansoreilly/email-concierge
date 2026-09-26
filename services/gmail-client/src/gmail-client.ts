@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import { type gmail_v1, google } from "googleapis";
 import { expectedTaxonomyLabelNames, isAppOwnedLabelName } from "./labels.js";
 
@@ -36,6 +37,136 @@ export type GmailDraft = gmail_v1.Schema$Draft;
 export type GmailHistoryListResponse = gmail_v1.Schema$ListHistoryResponse;
 export type GmailMessagesListResponse = gmail_v1.Schema$ListMessagesResponse;
 export type GmailLabelsListResponse = gmail_v1.Schema$ListLabelsResponse;
+
+/** Thrown by historyList() when Gmail returns 404 (startHistoryId too old/expired). */
+export class GmailHistoryExpiredError extends Error {
+  constructor(startHistoryId: string) {
+    super(
+      `Gmail history cursor "${startHistoryId}" has expired (404). Caller should fall back to a fresh messagesList() backfill.`,
+    );
+    this.name = "GmailHistoryExpiredError";
+  }
+}
+
+/** Thrown by createGmailClientFromSecret() when the Gmail OAuth secret has no value yet. */
+export class GmailNotConfiguredError extends Error {
+  constructor() {
+    super(
+      "Gmail OAuth secret has no value yet (scripts/oauth-bootstrap.ts hasn't been run). Skipping Gmail-dependent work for this invocation.",
+    );
+    this.name = "GmailNotConfiguredError";
+  }
+}
+
+function isGoogleApiError(err: unknown): err is { code: number } {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    typeof (err as { code: unknown }).code === "number"
+  );
+}
+
+export interface ParsedMessage {
+  messageId: string;
+  threadId: string;
+  historyId: string | undefined;
+  from: string;
+  subject: string;
+  snippet: string;
+  bodyText: string;
+  receivedAt: string;
+  headers: { listUnsubscribe?: string; precedence?: string };
+  labelIds: string[];
+}
+
+const MAX_BODY_TEXT_BYTES = 10_000;
+
+function headerValue(
+  headers: gmail_v1.Schema$MessagePartHeader[] | undefined,
+  name: string,
+): string | undefined {
+  return (
+    headers?.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value ??
+    undefined
+  );
+}
+
+function decodeBase64Url(data: string): string {
+  return Buffer.from(data, "base64url").toString("utf-8");
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Walks a MIME part tree depth-first looking for the first part matching mimeType. */
+function findPart(
+  part: gmail_v1.Schema$MessagePart | undefined,
+  mimeType: string,
+): gmail_v1.Schema$MessagePart | undefined {
+  if (!part) return undefined;
+  if (part.mimeType === mimeType && part.body?.data) return part;
+  for (const child of part.parts ?? []) {
+    const found = findPart(child, mimeType);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function extractBodyText(
+  payload: gmail_v1.Schema$MessagePart | undefined,
+): string {
+  if (!payload) return "";
+
+  const plainPart = findPart(payload, "text/plain");
+  if (plainPart?.body?.data) {
+    return decodeBase64Url(plainPart.body.data);
+  }
+
+  const htmlPart = findPart(payload, "text/html");
+  if (htmlPart?.body?.data) {
+    return stripHtml(decodeBase64Url(htmlPart.body.data));
+  }
+
+  if (payload.body?.data) {
+    return decodeBase64Url(payload.body.data);
+  }
+
+  return "";
+}
+
+/** Converts a raw googleapis Gmail message into the shape poll-lambda/draft-lambda consume. */
+export function parseGmailMessage(raw: GmailMessage): ParsedMessage {
+  const headers = raw.payload?.headers;
+  const bodyText = extractBodyText(raw.payload).slice(0, MAX_BODY_TEXT_BYTES);
+  const internalDateMs = raw.internalDate
+    ? Number(raw.internalDate)
+    : Number.NaN;
+
+  return {
+    messageId: raw.id ?? "",
+    threadId: raw.threadId ?? "",
+    historyId: raw.historyId ?? undefined,
+    from: headerValue(headers, "From") ?? "",
+    subject: headerValue(headers, "Subject") ?? "",
+    snippet: raw.snippet ?? "",
+    bodyText,
+    receivedAt: Number.isFinite(internalDateMs)
+      ? new Date(internalDateMs).toISOString()
+      : new Date().toISOString(),
+    headers: {
+      listUnsubscribe: headerValue(headers, "List-Unsubscribe"),
+      precedence: headerValue(headers, "Precedence"),
+    },
+    labelIds: raw.labelIds ?? [],
+  };
+}
 
 /**
  * Narrow surface of the underlying googleapis Gmail client that this
@@ -145,28 +276,94 @@ export class GmailClient {
     this.api = api;
   }
 
-  async historyList(startHistoryId: string): Promise<GmailHistoryListResponse> {
-    const { data } = await this.api.historyList({
-      userId: USER_ID,
-      startHistoryId,
-    });
-    return data;
+  /**
+   * Wraps history.list's own pagination + a typed error for the specific
+   * 404 case (startHistoryId too old / expired) so callers can distinguish
+   * "no new mail" from "cursor expired, fall back to a fresh backfill"
+   * without inspecting raw HTTP status codes themselves.
+   */
+  async historyList(params: {
+    startHistoryId: string;
+    pageToken?: string;
+  }): Promise<{
+    messageIdsAdded: string[];
+    historyId: string | undefined;
+    nextPageToken: string | undefined;
+  }> {
+    let data: GmailHistoryListResponse;
+    try {
+      const result = await this.api.historyList({
+        userId: USER_ID,
+        startHistoryId: params.startHistoryId,
+        pageToken: params.pageToken,
+      });
+      data = result.data;
+    } catch (err) {
+      if (isGoogleApiError(err) && err.code === 404) {
+        throw new GmailHistoryExpiredError(params.startHistoryId);
+      }
+      throw err;
+    }
+
+    const messageIdsAdded = (data.history ?? []).flatMap(
+      (entry) =>
+        entry.messagesAdded
+          ?.map((m) => m.message?.id)
+          .filter((id): id is string => Boolean(id)) ?? [],
+    );
+
+    return {
+      messageIdsAdded,
+      historyId: data.historyId ?? undefined,
+      nextPageToken: data.nextPageToken ?? undefined,
+    };
   }
 
-  async messagesList(query?: string): Promise<GmailMessagesListResponse> {
+  /**
+   * Restricted to the inbox and a bounded lookback so Phase 5's own
+   * generated drafts (which live outside INBOX, in the thread they were
+   * created against) never show up here and get reclassified.
+   */
+  async messagesList(params: {
+    query?: string;
+    pageToken?: string;
+    maxResults?: number;
+  }): Promise<{ messageIds: string[]; nextPageToken: string | undefined }> {
     const { data } = await this.api.messagesList({
       userId: USER_ID,
-      q: query,
+      q: params.query,
+      pageToken: params.pageToken,
+      maxResults: params.maxResults,
+      labelIds: ["INBOX"],
     });
-    return data;
+    return {
+      messageIds: (data.messages ?? [])
+        .map((m) => m.id)
+        .filter((id): id is string => Boolean(id)),
+      nextPageToken: data.nextPageToken ?? undefined,
+    };
   }
 
-  async messagesGet(messageId: string): Promise<GmailMessage> {
+  async messagesGetRaw(messageId: string): Promise<GmailMessage> {
     const { data } = await this.api.messagesGet({
       userId: USER_ID,
       id: messageId,
+      format: "full",
     });
     return data;
+  }
+
+  /**
+   * messagesGetRaw() plus MIME parsing into the shape poll-lambda/
+   * draft-lambda actually need: decoded body text (text/plain preferred,
+   * HTML stripped as a fallback), pulled headers, and receivedAt. Body is
+   * truncated to ~10KB - DynamoDB items cap at 400KB total, and a smaller
+   * body also bounds how much untrusted email content a classifier prompt
+   * ever sees (defense in depth against prompt injection in mail bodies).
+   */
+  async messagesGet(messageId: string): Promise<ParsedMessage> {
+    const raw = await this.messagesGetRaw(messageId);
+    return parseGmailMessage(raw);
   }
 
   /**
@@ -311,4 +508,128 @@ export class GmailClient {
 
 export function createGmailClient(config: GmailClientConfig): GmailClient {
   return new GmailClient(buildGmailApiSurface(config));
+}
+
+interface SecretsManagerClientLike {
+  send(command: unknown): Promise<{ SecretString?: string }>;
+}
+
+/**
+ * Fetches {clientId, clientSecret, refreshToken} JSON from the given
+ * Secrets Manager secret ARN and constructs a ready-to-use GmailClient
+ * with its label allowlist already loaded. This is the one place all
+ * three Lambdas should go to get a Gmail client from Terraform-provisioned
+ * config, rather than each hand-rolling the Secrets Manager call.
+ *
+ * Throws GmailNotConfiguredError (not a generic error) when the secret
+ * exists but has no version yet - the normal state between "Terraform
+ * apply" and "someone ran scripts/oauth-bootstrap.ts". Callers should
+ * catch this specifically and no-op cleanly rather than crash-loop.
+ */
+export async function createGmailClientFromSecret(
+  secretArn: string,
+  secretsClient: SecretsManagerClientLike,
+  GetSecretValueCommand: new (input: {
+    SecretId: string;
+  }) => unknown,
+): Promise<GmailClient> {
+  let secretString: string | undefined;
+  try {
+    const result = await secretsClient.send(
+      new GetSecretValueCommand({ SecretId: secretArn }),
+    );
+    secretString = result.SecretString;
+  } catch (err) {
+    if (isResourceNotFoundOrNoVersion(err)) {
+      throw new GmailNotConfiguredError();
+    }
+    throw err;
+  }
+
+  if (!secretString) {
+    throw new GmailNotConfiguredError();
+  }
+
+  const parsed: unknown = JSON.parse(secretString);
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("clientId" in parsed) ||
+    !("clientSecret" in parsed) ||
+    !("refreshToken" in parsed)
+  ) {
+    throw new GmailNotConfiguredError();
+  }
+
+  const config = parsed as GmailClientConfig;
+  const client = createGmailClient(config);
+  await client.refreshLabelAllowlist();
+  return client;
+}
+
+function isResourceNotFoundOrNoVersion(err: unknown): boolean {
+  const name =
+    typeof err === "object" && err !== null && "name" in err
+      ? String((err as { name: unknown }).name)
+      : "";
+  return (
+    name === "ResourceNotFoundException" || name === "ResourceNotFoundError"
+  );
+}
+
+/**
+ * The ONLY OAuth-consent-flow surface this module exposes, used exclusively
+ * by scripts/oauth-bootstrap.ts (a local, one-time, interactive script - never
+ * called from a Lambda). Runs Google's OAuth2 "Desktop app" loopback flow:
+ * starts a temporary local HTTP server on `port`, opens the consent URL in
+ * the user's browser (the caller must do the opening - this function only
+ * returns the URL and waits for the redirect), and exchanges the returned
+ * authorization code for a refresh token.
+ */
+export async function runLoopbackConsentFlow(config: {
+  clientId: string;
+  clientSecret: string;
+  scopes: string[];
+  port: number;
+}): Promise<{ refreshToken: string; consentUrl: string }> {
+  const redirectUri = `http://127.0.0.1:${config.port}`;
+  const auth = new google.auth.OAuth2(
+    config.clientId,
+    config.clientSecret,
+    redirectUri,
+  );
+  const consentUrl = auth.generateAuthUrl({
+    access_type: "offline",
+    prompt: "consent",
+    scope: config.scopes,
+  });
+
+  const code = await new Promise<string>((resolve, reject) => {
+    const server = createServer((req, res) => {
+      const url = new URL(req.url ?? "/", redirectUri);
+      const authCode = url.searchParams.get("code");
+      const error = url.searchParams.get("error");
+      res.end(
+        authCode
+          ? "Authorization received. You can close this tab."
+          : `Authorization failed: ${error ?? "unknown error"}`,
+      );
+      server.close();
+      if (authCode) {
+        resolve(authCode);
+      } else {
+        reject(new Error(`OAuth consent denied or failed: ${error}`));
+      }
+    });
+    server.listen(config.port);
+  });
+
+  const { tokens } = await auth.getToken(code);
+  if (!tokens.refresh_token) {
+    throw new Error(
+      "Google did not return a refresh token. This usually means consent was already granted previously without prompt=consent/access_type=offline - revoke the app's access at https://myaccount.google.com/permissions and try again.",
+    );
+  }
+
+  return { refreshToken: tokens.refresh_token, consentUrl };
 }

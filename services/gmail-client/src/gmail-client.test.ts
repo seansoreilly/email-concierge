@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { GmailApiSurface, GmailLabel } from "./gmail-client.js";
 import {
   GmailClient,
+  GmailHistoryExpiredError,
   LabelAllowlistNotLoadedError,
   LabelNotAllowedError,
 } from "./gmail-client.js";
@@ -270,43 +271,96 @@ describe("GmailClient.draftsCreate", () => {
 });
 
 describe("GmailClient read-only passthroughs", () => {
-  it("historyList calls through with startHistoryId", async () => {
+  it("historyList calls through with startHistoryId and parses messagesAdded", async () => {
     const api = makeFakeApi({
-      historyList: vi.fn().mockResolvedValue({ data: { history: [] } }),
+      historyList: vi.fn().mockResolvedValue({
+        data: {
+          history: [
+            { messagesAdded: [{ message: { id: "msg-1" } }] },
+            { messagesAdded: [{ message: { id: "msg-2" } }] },
+          ],
+          historyId: "999",
+        },
+      }),
     });
     const client = new GmailClient(api);
 
-    await client.historyList("12345");
+    const result = await client.historyList({ startHistoryId: "12345" });
 
     expect(api.historyList).toHaveBeenCalledWith({
       userId: "me",
       startHistoryId: "12345",
+      pageToken: undefined,
     });
+    expect(result.messageIdsAdded).toEqual(["msg-1", "msg-2"]);
+    expect(result.historyId).toBe("999");
   });
 
-  it("messagesList calls through with an optional query", async () => {
+  it("historyList throws GmailHistoryExpiredError on a 404", async () => {
     const api = makeFakeApi({
-      messagesList: vi.fn().mockResolvedValue({ data: { messages: [] } }),
+      historyList: vi.fn().mockRejectedValue({ code: 404 }),
     });
     const client = new GmailClient(api);
 
-    await client.messagesList("is:unread");
+    await expect(
+      client.historyList({ startHistoryId: "stale" }),
+    ).rejects.toThrow(GmailHistoryExpiredError);
+  });
+
+  it("messagesList calls through with an optional query, restricted to INBOX", async () => {
+    const api = makeFakeApi({
+      messagesList: vi.fn().mockResolvedValue({
+        data: { messages: [{ id: "msg-1" }, { id: "msg-2" }] },
+      }),
+    });
+    const client = new GmailClient(api);
+
+    const result = await client.messagesList({ query: "is:unread" });
 
     expect(api.messagesList).toHaveBeenCalledWith({
       userId: "me",
       q: "is:unread",
+      pageToken: undefined,
+      maxResults: undefined,
+      labelIds: ["INBOX"],
     });
+    expect(result.messageIds).toEqual(["msg-1", "msg-2"]);
   });
 
-  it("messagesGet calls through with the message ID", async () => {
+  it("messagesGet fetches full format and parses into ParsedMessage", async () => {
     const api = makeFakeApi({
-      messagesGet: vi.fn().mockResolvedValue({ data: { id: "msg-1" } }),
+      messagesGet: vi.fn().mockResolvedValue({
+        data: {
+          id: "msg-1",
+          threadId: "thread-1",
+          snippet: "hello",
+          internalDate: "1700000000000",
+          payload: {
+            headers: [
+              { name: "From", value: "a@example.com" },
+              { name: "Subject", value: "Hi" },
+            ],
+            mimeType: "text/plain",
+            body: { data: Buffer.from("body text").toString("base64url") },
+          },
+          labelIds: ["INBOX"],
+        },
+      }),
     });
     const client = new GmailClient(api);
 
-    await client.messagesGet("msg-1");
+    const result = await client.messagesGet("msg-1");
 
-    expect(api.messagesGet).toHaveBeenCalledWith({ userId: "me", id: "msg-1" });
+    expect(api.messagesGet).toHaveBeenCalledWith({
+      userId: "me",
+      id: "msg-1",
+      format: "full",
+    });
+    expect(result.messageId).toBe("msg-1");
+    expect(result.threadId).toBe("thread-1");
+    expect(result.from).toBe("a@example.com");
+    expect(result.subject).toBe("Hi");
+    expect(result.bodyText).toBe("body text");
   });
 
   it("draftsGet and draftsDelete call through with the draft ID", async () => {

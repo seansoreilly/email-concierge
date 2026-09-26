@@ -48,3 +48,18 @@ output "gmail_oauth_secret_arn" {
   description = "Secrets Manager ARN for the Gmail OAuth secret - consumed by scripts/oauth-bootstrap.ts (Phase 4)"
   value       = aws_secretsmanager_secret.gmail_oauth.arn
 }
+
+output "amplify_app_id" {
+  description = "Amplify app ID - consumed by scripts/deploy-web.sh for create-deployment/start-deployment"
+  value       = aws_amplify_app.web.id
+}
+
+output "amplify_branch_name" {
+  description = "Amplify branch name - consumed by scripts/deploy-web.sh"
+  value       = aws_amplify_branch.mvp.branch_name
+}
+
+output "amplify_default_domain" {
+  description = "Amplify app's default domain (branch URL is https://<branch>.<this>)"
+  value       = aws_amplify_app.web.default_domain
+}

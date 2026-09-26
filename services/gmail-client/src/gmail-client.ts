@@ -529,9 +529,7 @@ interface SecretsManagerClientLike {
 export async function createGmailClientFromSecret(
   secretArn: string,
   secretsClient: SecretsManagerClientLike,
-  GetSecretValueCommand: new (input: {
-    SecretId: string;
-  }) => unknown,
+  GetSecretValueCommand: new (input: { SecretId: string }) => unknown,
 ): Promise<GmailClient> {
   let secretString: string | undefined;
   try {
@@ -581,16 +579,19 @@ function isResourceNotFoundOrNoVersion(err: unknown): boolean {
  * The ONLY OAuth-consent-flow surface this module exposes, used exclusively
  * by scripts/oauth-bootstrap.ts (a local, one-time, interactive script - never
  * called from a Lambda). Runs Google's OAuth2 "Desktop app" loopback flow:
- * starts a temporary local HTTP server on `port`, opens the consent URL in
- * the user's browser (the caller must do the opening - this function only
- * returns the URL and waits for the redirect), and exchanges the returned
- * authorization code for a refresh token.
+ * starts a temporary local HTTP server on `port`, generates the consent URL
+ * (handed to the caller via `onConsentUrl` as soon as it's available, since
+ * this promise itself only settles once the redirect with the authorization
+ * code comes back - the caller must display/open the URL, this function
+ * never does so itself), and exchanges the returned authorization code for a
+ * refresh token.
  */
 export async function runLoopbackConsentFlow(config: {
   clientId: string;
   clientSecret: string;
   scopes: string[];
   port: number;
+  onConsentUrl?: (url: string) => void;
 }): Promise<{ refreshToken: string; consentUrl: string }> {
   const redirectUri = `http://127.0.0.1:${config.port}`;
   const auth = new google.auth.OAuth2(
@@ -603,6 +604,7 @@ export async function runLoopbackConsentFlow(config: {
     prompt: "consent",
     scope: config.scopes,
   });
+  config.onConsentUrl?.(consentUrl);
 
   const code = await new Promise<string>((resolve, reject) => {
     const server = createServer((req, res) => {
@@ -621,6 +623,12 @@ export async function runLoopbackConsentFlow(config: {
         reject(new Error(`OAuth consent denied or failed: ${error}`));
       }
     });
+    // Without this handler, a port conflict (EADDRINUSE, common on 8080)
+    // throws asynchronously outside this Promise's control flow and crashes
+    // the process with a raw stack trace - exactly what callers of this
+    // function (i.e. oauth-bootstrap.ts) need to avoid per their own
+    // human-friendly-error-output requirement.
+    server.on("error", reject);
     server.listen(config.port);
   });
 

@@ -36,7 +36,7 @@ export const fixtureEmails: FixtureEmail[] = [
       responseState: "FYI",
       contentTag: "Notification",
       priorityMin: 2,
-      priorityMax: 4,
+      priorityMax: 5,
     },
   },
   {

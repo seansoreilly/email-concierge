@@ -21,7 +21,7 @@ export type ContentTag = z.infer<typeof ContentTag>;
 export const Priority = z.number().int().min(2).max(10);
 export type Priority = z.infer<typeof Priority>;
 
-export const ClassificationSource = z.enum(["jev", "haiku"]);
+export const ClassificationSource = z.enum(["jev", "haiku", "heuristic"]);
 export type ClassificationSource = z.infer<typeof ClassificationSource>;
 
 export const Classification = z.object({

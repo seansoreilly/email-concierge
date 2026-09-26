@@ -76,7 +76,10 @@ resource "aws_lambda_function" "poll" {
   filename         = data.archive_file.poll.output_path
   source_code_hash = data.archive_file.poll.output_base64sha256
 
-  timeout     = 90
+  # 300s (not the earlier 90s) - a first-run 7-day backfill processes up to
+  # ~20 messages per invocation (get + classify + batchModify each), which
+  # at 1-2s per message can approach the old timeout on a real inbox.
+  timeout     = 300
   memory_size = 512
 
   reserved_concurrent_executions = 1

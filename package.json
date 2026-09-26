@@ -8,9 +8,10 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "lint": "biome check ."
+    "lint": "biome check .",
+    "seed": "pnpm --filter @email-concierge/scripts seed"
   },
-  "workspaces": ["shared", "services/*", "web"],
+  "workspaces": ["shared", "services/*", "scripts", "web"],
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "typescript": "^5.7.2"

@@ -6,15 +6,20 @@
   "main": "./src/index.ts",
   "scripts": {
     "build": "esbuild src/index.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/index.mjs --external:@aws-sdk/*",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.700.0",
+    "@aws-sdk/lib-dynamodb": "^3.700.0",
     "@email-concierge/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.147",
     "@types/node": "^22.10.2",
+    "aws-sdk-client-mock": "^4.1.0",
     "esbuild": "^0.28.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^5.0.2"
   }
 }

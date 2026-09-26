@@ -32,7 +32,17 @@ pnpm --filter @email-concierge/web build
 echo "==> Zipping web/dist contents"
 ZIP_PATH="$REPO_ROOT/web/dist.zip"
 rm -f "$ZIP_PATH"
-(cd web/dist && zip -r -q "$ZIP_PATH" .)
+python3 -c "
+import os, zipfile
+dist_dir = 'web/dist'
+zip_path = 'web/dist.zip'
+with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+    for root, _, files in os.walk(dist_dir):
+        for f in files:
+            full = os.path.join(root, f)
+            rel = os.path.relpath(full, dist_dir)
+            zf.write(full, rel)
+"
 
 echo "==> Creating Amplify deployment"
 CREATE_OUTPUT="$(aws amplify create-deployment --app-id "$APP_ID" --branch-name "$BRANCH_NAME")"

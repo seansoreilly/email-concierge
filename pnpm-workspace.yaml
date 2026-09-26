@@ -2,3 +2,6 @@ packages:
   - "shared"
   - "services/*"
   - "web"
+
+onlyBuiltDependencies:
+  - esbuild

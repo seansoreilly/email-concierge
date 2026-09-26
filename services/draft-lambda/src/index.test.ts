@@ -14,7 +14,7 @@ import type { DynamoDBStreamEvent } from "aws-lambda";
 import { mockClient } from "aws-sdk-client-mock";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DraftLambdaDeps } from "./index.js";
-import { handler } from "./index.js";
+import { createHandler } from "./index.js";
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 const EMAILS_TABLE = "email-concierge-emails-test";
@@ -102,20 +102,24 @@ describe("draft-lambda handler", () => {
   it("skips fixture records before doing anything else", async () => {
     const event = streamEventFor(baseRecord({ isFixture: true }));
 
-    const result = await handler(event, deps);
+    const result = await createHandler(deps)(event);
 
     expect(result.batchItemFailures).toEqual([]);
-    expect(getGmailClient).toHaveBeenCalled(); // client is still fetched once per batch
+    // Gmail client is fetched lazily, only for records that survive the
+    // fixture/responseState/draftCreated checks - an all-fixture batch
+    // must do zero Secrets Manager / Gmail API round-trips.
+    expect(getGmailClient).not.toHaveBeenCalled();
     expect(anthropicCreate).not.toHaveBeenCalled();
     expect(draftsCreate).not.toHaveBeenCalled();
     expect(ddbMock.calls()).toHaveLength(0);
   });
 
   it("returns cleanly with no error when Gmail is not configured yet", async () => {
+    ddbMock.on(GetCommand).resolves({ Item: undefined });
     getGmailClient.mockRejectedValue(new GmailNotConfiguredError());
     const event = streamEventFor(baseRecord());
 
-    const result = await handler(event, deps);
+    const result = await createHandler(deps)(event);
 
     expect(result.batchItemFailures).toEqual([]);
     expect(anthropicCreate).not.toHaveBeenCalled();
@@ -137,7 +141,7 @@ describe("draft-lambda handler", () => {
       }),
     );
 
-    await handler(event, deps);
+    await createHandler(deps)(event);
 
     expect(anthropicCreate).not.toHaveBeenCalled();
     expect(draftsCreate).not.toHaveBeenCalled();
@@ -147,7 +151,7 @@ describe("draft-lambda handler", () => {
     ddbMock.on(GetCommand).resolves({ Item: { draftCreated: true } });
     const event = streamEventFor(baseRecord());
 
-    await handler(event, deps);
+    await createHandler(deps)(event);
 
     expect(anthropicCreate).not.toHaveBeenCalled();
     expect(draftsCreate).not.toHaveBeenCalled();
@@ -158,7 +162,7 @@ describe("draft-lambda handler", () => {
     ddbMock.on(UpdateCommand).resolves({});
     const event = streamEventFor(baseRecord());
 
-    const result = await handler(event, deps);
+    const result = await createHandler(deps)(event);
 
     expect(result.batchItemFailures).toEqual([]);
     expect(anthropicCreate).toHaveBeenCalledTimes(1);
@@ -168,7 +172,6 @@ describe("draft-lambda handler", () => {
     const decoded = Buffer.from(rawMessage, "base64url").toString("utf-8");
     expect(decoded).toContain("To: sarah.chen@example.com");
     expect(decoded).toContain("Subject: Re: Can you review the doc?");
-    expect(decoded).toContain("In-Reply-To: <msg-1>");
     expect(decoded).toContain("Thanks, I'll take a look");
 
     expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(1);
@@ -181,7 +184,7 @@ describe("draft-lambda handler", () => {
       baseRecord({ subject: "Re: Can you review the doc?" }),
     );
 
-    await handler(event, deps);
+    await createHandler(deps)(event);
 
     const [, rawMessage] = draftsCreate.mock.calls[0] as [string, string];
     const decoded = Buffer.from(rawMessage, "base64url").toString("utf-8");
@@ -201,7 +204,7 @@ describe("draft-lambda handler", () => {
     );
     const event = streamEventFor(baseRecord());
 
-    const result = await handler(event, deps);
+    const result = await createHandler(deps)(event);
 
     expect(result.batchItemFailures).toEqual([]);
     expect(draftsCreate).toHaveBeenCalledTimes(1); // draft was created; only the flag-set lost the race
@@ -211,7 +214,7 @@ describe("draft-lambda handler", () => {
     ddbMock.on(GetCommand).rejects(new Error("dynamo unavailable"));
     const event = streamEventFor(baseRecord(), "seq-42");
 
-    const result = await handler(event, deps);
+    const result = await createHandler(deps)(event);
 
     expect(result.batchItemFailures).toEqual([{ itemIdentifier: "seq-42" }]);
   });
@@ -229,7 +232,7 @@ describe("draft-lambda handler", () => {
       Records: [...eventA.Records, ...eventB.Records],
     };
 
-    const result = await handler(combined, deps);
+    const result = await createHandler(deps)(combined);
 
     expect(result.batchItemFailures).toEqual([]);
     expect(draftsCreate).toHaveBeenCalledTimes(2);

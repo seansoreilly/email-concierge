@@ -149,7 +149,15 @@ async function generateDraftBody(
   return textBlock.text.trim();
 }
 
-/** Builds a base64url-encoded RFC 2822 reply message, threaded via In-Reply-To/References. */
+/**
+ * Builds a base64url-encoded RFC 2822 reply message. Threading is via the
+ * draft resource's threadId (see draftsCreate), not In-Reply-To/References
+ * headers - record.messageId is Gmail's internal hex message ID, not an
+ * RFC 2822 Message-ID (which we never captured from the original mail), so
+ * a header built from it would be a bogus reference. threadId alone is
+ * sufficient for Gmail's own UI; a future phase could thread by header too
+ * if the original Message-ID header is captured in ParsedMessage.
+ */
 function buildRawReplyMessage(record: EmailRecord, bodyText: string): string {
   const toAddress = extractEmailAddress(record.from);
   const subject = record.subject.toLowerCase().startsWith("re:")
@@ -159,8 +167,6 @@ function buildRawReplyMessage(record: EmailRecord, bodyText: string): string {
   const headers = [
     `To: ${toAddress}`,
     `Subject: ${subject}`,
-    `In-Reply-To: <${record.messageId}>`,
-    `References: <${record.messageId}>`,
     "Content-Type: text/plain; charset=UTF-8",
   ].join("\r\n");
 
@@ -212,35 +218,49 @@ async function isDraftAlreadyCreated(
   return result.Item?.draftCreated === true;
 }
 
-async function processRecord(
+/**
+ * True if this record needs a Gmail client at all - fixtures, non-"To
+ * Respond" records, and already-drafted records never touch Gmail. Checked
+ * BEFORE fetching a Gmail client so a batch containing only such records
+ * (e.g. fixture seeding, which is known to fire this trigger for real) does
+ * zero Secrets Manager or Gmail API calls.
+ */
+async function needsGmailClient(
   deps: DraftLambdaDeps,
-  gmail: DraftGmailClient,
   record: EmailRecord,
-): Promise<void> {
+): Promise<boolean> {
   if (record.isFixture) {
     console.log("draft-lambda: skipping fixture record", {
       messageId: record.messageId,
     });
-    return;
+    return false;
   }
 
   if (record.classification.responseState !== "To Respond") {
     // Defensive backstop for the Terraform-side stream filter - see the
     // module comment in infra/lambda.tf for why this can't be assumed away.
-    return;
+    return false;
   }
 
   // Re-check against DynamoDB directly (not the stream's NewImage, which
   // can be stale on a retried/duplicate delivery) before doing any real
-  // work - avoids an unnecessary Haiku call on a guaranteed-to-be-rejected
-  // write.
+  // work - avoids an unnecessary Gmail/Haiku call on a guaranteed-to-be-
+  // rejected write.
   if (await isDraftAlreadyCreated(deps, record.messageId)) {
     console.log("draft-lambda: draft already created, skipping", {
       messageId: record.messageId,
     });
-    return;
+    return false;
   }
 
+  return true;
+}
+
+async function processRecord(
+  deps: DraftLambdaDeps,
+  gmail: DraftGmailClient,
+  record: EmailRecord,
+): Promise<void> {
   const bodyText = await generateDraftBody(deps, record);
   const rawMessage = buildRawReplyMessage(record, bodyText);
   const draft = await gmail.draftsCreate(record.threadId, rawMessage);
@@ -261,45 +281,59 @@ async function processRecord(
   }
 }
 
-export async function handler(
-  event: DynamoDBStreamEvent,
-  deps: DraftLambdaDeps = defaultDeps,
-): Promise<DynamoDBBatchResponse> {
-  console.log("draft-lambda invoked", { recordCount: event.Records.length });
+/**
+ * Lambda's Node.js runtime always invokes the exported handler with
+ * (event, context) - a default parameter on a second `deps` argument never
+ * fires, since `context` is always a real, truthy value. createHandler is
+ * the standard fix: bind deps via closure, export a zero-config `handler`
+ * for Lambda, and let tests call createHandler(fakeDeps) directly.
+ */
+export function createHandler(
+  deps: DraftLambdaDeps,
+): (event: DynamoDBStreamEvent) => Promise<DynamoDBBatchResponse> {
+  return async (event: DynamoDBStreamEvent): Promise<DynamoDBBatchResponse> => {
+    console.log("draft-lambda invoked", { recordCount: event.Records.length });
 
-  let gmail: DraftGmailClient;
-  try {
-    gmail = await deps.getGmailClient();
-  } catch (err) {
-    if (err instanceof GmailNotConfiguredError) {
-      console.log(
-        "draft-lambda: Gmail not configured yet - skipping this batch",
-      );
-      return { batchItemFailures: [] };
-    }
-    throw err;
-  }
+    const batchItemFailures: DynamoDBBatchResponse["batchItemFailures"] = [];
+    let gmail: DraftGmailClient | undefined;
 
-  const batchItemFailures: DynamoDBBatchResponse["batchItemFailures"] = [];
+    for (const streamRecord of event.Records) {
+      const record = newImageOf(streamRecord);
+      if (!record) continue;
 
-  for (const streamRecord of event.Records) {
-    const record = newImageOf(streamRecord);
-    if (!record) continue;
+      try {
+        if (!(await needsGmailClient(deps, record))) continue;
 
-    try {
-      await processRecord(deps, gmail, record);
-    } catch (err) {
-      console.error("draft-lambda: failed to process record", {
-        messageId: record.messageId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      if (streamRecord.dynamodb?.SequenceNumber) {
-        batchItemFailures.push({
-          itemIdentifier: streamRecord.dynamodb.SequenceNumber,
+        if (!gmail) {
+          try {
+            gmail = await deps.getGmailClient();
+          } catch (err) {
+            if (err instanceof GmailNotConfiguredError) {
+              console.log(
+                "draft-lambda: Gmail not configured yet - skipping remaining records in this batch",
+              );
+              break;
+            }
+            throw err;
+          }
+        }
+
+        await processRecord(deps, gmail, record);
+      } catch (err) {
+        console.error("draft-lambda: failed to process record", {
+          messageId: record.messageId,
+          error: err instanceof Error ? err.message : String(err),
         });
+        if (streamRecord.dynamodb?.SequenceNumber) {
+          batchItemFailures.push({
+            itemIdentifier: streamRecord.dynamodb.SequenceNumber,
+          });
+        }
       }
     }
-  }
 
-  return { batchItemFailures };
+    return { batchItemFailures };
+  };
 }
+
+export const handler = createHandler(defaultDeps);

@@ -202,6 +202,17 @@ resource "aws_lambda_event_source_mapping" "emails_stream_to_draft" {
   function_name     = aws_lambda_function.draft.arn
   starting_position = "LATEST"
 
+  # Without this, Lambda ignores draft-lambda's batchItemFailures return
+  # value entirely - a transient Haiku/Gmail error would mark the whole
+  # batch as successfully processed, silently dropping that record forever
+  # (draftCreated stays false, no retry, no error surfaced anywhere).
+  function_response_types = ["ReportBatchItemFailures"]
+
+  # Caps how long a poison record (one that fails every retry) can block
+  # this shard's iterator before Lambda gives up and moves on, rather than
+  # retrying for the stream's full 24h retention window.
+  maximum_retry_attempts = 3
+
   filter_criteria {
     filter {
       pattern = jsonencode({

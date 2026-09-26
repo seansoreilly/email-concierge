@@ -10,8 +10,8 @@ import type {
   APIGatewayProxyResultV2,
 } from "aws-lambda";
 import { mockClient } from "aws-sdk-client-mock";
-import { beforeEach, describe, expect, it } from "vitest";
-import { handler } from "./index.ts";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { __setGmailClientFactoryForTests, handler } from "./index.ts";
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 
@@ -31,6 +31,15 @@ function expectStructuredResult(result: APIGatewayProxyResultV2): {
 beforeEach(() => {
   ddbMock.reset();
   process.env.EMAILS_TABLE_NAME = "email-concierge-emails-test";
+  Reflect.deleteProperty(process.env, "GMAIL_OAUTH_SECRET_ARN");
+  // Default: no Gmail client factory override - production code path
+  // (unset GMAIL_OAUTH_SECRET_ARN => GmailNotConfiguredError => silent skip).
+  __setGmailClientFactoryForTests(async () => {
+    const { GmailNotConfiguredError } = await import(
+      "@email-concierge/gmail-client"
+    );
+    throw new GmailNotConfiguredError();
+  });
 });
 
 function makeEvent(
@@ -236,6 +245,159 @@ describe("POST /emails/{messageId}/correction", () => {
     );
 
     expect(statusCode).toBe(404);
+  });
+});
+
+describe("Gmail sync on correction", () => {
+  const nonFixtureEmail: EmailRecord = {
+    ...sampleEmail,
+    messageId: "real-001",
+    isFixture: false,
+  };
+
+  const updatedNonFixtureRecord: EmailRecord = {
+    ...nonFixtureEmail,
+    classification: {
+      ...nonFixtureEmail.classification,
+      responseState: "Done",
+      contentTag: "Work",
+      priority: 3,
+      responseStateConfidence: 1,
+      contentTagConfidence: 1,
+      priorityConfidence: 1,
+      source: "human",
+    },
+    corrections: [
+      {
+        messageId: "real-001",
+        correctedAt: "2026-09-26T00:00:00.000Z",
+        previous: {
+          responseState: "To Respond",
+          contentTag: "Work",
+          priority: 7,
+        },
+        corrected: { responseState: "Done", contentTag: "Work", priority: 3 },
+      },
+    ],
+  };
+
+  const correctionEventFor = (messageId: string): APIGatewayProxyEventV2 =>
+    makeEvent({
+      rawPath: `/emails/${messageId}/correction`,
+      pathParameters: { messageId },
+      body: JSON.stringify({
+        responseState: "Done",
+        contentTag: "Work",
+        priority: 3,
+      }),
+      requestContext: {
+        accountId: "123456789012",
+        apiId: "api-id",
+        domainName: "api-id.execute-api.us-east-1.amazonaws.com",
+        domainPrefix: "api-id",
+        http: {
+          method: "POST",
+          path: `/emails/${messageId}/correction`,
+          protocol: "HTTP/1.1",
+          sourceIp: "127.0.0.1",
+          userAgent: "vitest",
+        },
+        requestId: "request-id",
+        routeKey: "$default",
+        stage: "$default",
+        time: "26/Sep/2026:00:00:00 +0000",
+        timeEpoch: 1700000000000,
+      },
+    });
+
+  function makeFakeGmailClient() {
+    return {
+      batchModify: vi.fn().mockResolvedValue(undefined),
+      refreshLabelAllowlist: vi.fn().mockResolvedValue(
+        new Map<string, string>([
+          ["Concierge/Status/To Respond", "label-status-to-respond"],
+          ["Concierge/Status/Done", "label-status-done"],
+          ["Concierge/Tag/Work", "label-tag-work"],
+        ]),
+      ),
+    };
+  }
+
+  it("calls batchModify for a correction on a non-fixture record", async () => {
+    ddbMock.on(GetCommand).resolves({ Item: nonFixtureEmail });
+    ddbMock.on(UpdateCommand).resolves({ Attributes: updatedNonFixtureRecord });
+
+    const gmail = makeFakeGmailClient();
+    __setGmailClientFactoryForTests(async () => gmail);
+
+    const { statusCode } = expectStructuredResult(
+      await handler(correctionEventFor("real-001")),
+    );
+
+    expect(statusCode).toBe(200);
+    // contentTag stays "Work" before and after the correction, so its label
+    // is in both the add and previous sets - it must be added (harmless if
+    // already applied) but NOT removed, since only responseState actually
+    // changed (To Respond -> Done).
+    expect(gmail.batchModify).toHaveBeenCalledWith(
+      ["real-001"],
+      expect.arrayContaining(["label-status-done", "label-tag-work"]),
+      ["label-status-to-respond"],
+    );
+  });
+
+  it("does NOT call any Gmail method for a correction on a fixture record", async () => {
+    ddbMock.on(GetCommand).resolves({ Item: sampleEmail }); // sampleEmail has isFixture: true
+    const updatedFixtureRecord: EmailRecord = {
+      ...sampleEmail,
+      classification: {
+        ...sampleEmail.classification,
+        responseState: "Done",
+        source: "human",
+      },
+    };
+    ddbMock.on(UpdateCommand).resolves({ Attributes: updatedFixtureRecord });
+
+    const gmail = makeFakeGmailClient();
+    __setGmailClientFactoryForTests(async () => gmail);
+
+    const { statusCode } = expectStructuredResult(
+      await handler(correctionEventFor("fixture-001")),
+    );
+
+    expect(statusCode).toBe(200);
+    expect(gmail.batchModify).not.toHaveBeenCalled();
+    expect(gmail.refreshLabelAllowlist).not.toHaveBeenCalled();
+  });
+
+  it("still returns the successful DynamoDB-updated record when the Gmail sync fails", async () => {
+    ddbMock.on(GetCommand).resolves({ Item: nonFixtureEmail });
+    ddbMock.on(UpdateCommand).resolves({ Attributes: updatedNonFixtureRecord });
+
+    __setGmailClientFactoryForTests(async () => {
+      throw new Error("Gmail API is down");
+    });
+
+    const { statusCode, body: rawBody } = expectStructuredResult(
+      await handler(correctionEventFor("real-001")),
+    );
+
+    expect(statusCode).toBe(200);
+    const body = JSON.parse(rawBody) as EmailRecord;
+    expect(body.classification.responseState).toBe("Done");
+  });
+
+  it("skips Gmail sync silently when Gmail is not configured (GmailNotConfiguredError)", async () => {
+    ddbMock.on(GetCommand).resolves({ Item: nonFixtureEmail });
+    ddbMock.on(UpdateCommand).resolves({ Attributes: updatedNonFixtureRecord });
+    // beforeEach already wires the default factory to throw
+    // GmailNotConfiguredError when GMAIL_OAUTH_SECRET_ARN is unset.
+
+    const { statusCode } = expectStructuredResult(
+      await handler(correctionEventFor("real-001")),
+    );
+
+    expect(statusCode).toBe(200);
   });
 });
 

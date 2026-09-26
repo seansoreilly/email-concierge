@@ -3,13 +3,28 @@ import {
   DynamoDBClient,
 } from "@aws-sdk/client-dynamodb";
 import {
+  GetSecretValueCommand,
+  SecretsManagerClient,
+} from "@aws-sdk/client-secrets-manager";
+import {
   DynamoDBDocumentClient,
   GetCommand,
   ScanCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
+import type { GmailClient } from "@email-concierge/gmail-client";
 import {
+  GmailNotConfiguredError,
+  createGmailClientFromSecret,
+} from "@email-concierge/gmail-client";
+import {
+  contentTagLabelName,
+  responseStateLabelName,
+} from "@email-concierge/gmail-client/src/labels.ts";
+import {
+  type Classification,
   CorrectionRequest,
+  type CorrectionRequest as CorrectionRequestType,
   type EmailRecord,
   EmailRecord as EmailRecordSchema,
 } from "@email-concierge/shared";
@@ -33,8 +48,38 @@ const ddbClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(ddbClient, {
   marshallOptions: { removeUndefinedValues: true },
 });
+const secretsClient = new SecretsManagerClient({});
 
 const CORRECTION_PATH_PATTERN = /^\/emails\/([^/]+)\/correction$/;
+
+/** Minimal surface the correction handler needs from GmailClient - narrowed for easy test fakes. */
+type CorrectionGmailClient = Pick<
+  GmailClient,
+  "batchModify" | "refreshLabelAllowlist"
+>;
+
+/**
+ * Sourced from AWS Secrets Manager by default; overridable in tests so no
+ * live Secrets Manager/Gmail call is ever made during `pnpm test`.
+ */
+let getGmailClient: () => Promise<CorrectionGmailClient> = async () => {
+  const secretArn = process.env.GMAIL_OAUTH_SECRET_ARN;
+  if (!secretArn) {
+    throw new GmailNotConfiguredError();
+  }
+  return createGmailClientFromSecret(
+    secretArn,
+    secretsClient,
+    GetSecretValueCommand,
+  );
+};
+
+/** Test-only seam - never called from production code. */
+export function __setGmailClientFactoryForTests(
+  factory: typeof getGmailClient,
+): void {
+  getGmailClient = factory;
+}
 
 function jsonResponse(
   statusCode: number,
@@ -94,6 +139,58 @@ function decodeBody(event: APIGatewayProxyEventV2): string {
   return event.isBase64Encoded
     ? Buffer.from(event.body, "base64").toString("utf8")
     : event.body;
+}
+
+/**
+ * Best-effort sync of a human correction back to Gmail via batchModify:
+ * removes the labels implied by the previous classification and adds the
+ * labels implied by the corrected one. Never throws - any failure (Gmail
+ * not configured yet, a transient API error, etc.) is logged and swallowed,
+ * since the DynamoDB update (the primary source of truth) has already
+ * succeeded by the time this is called.
+ */
+async function syncCorrectionToGmail(
+  messageId: string,
+  previous: Pick<Classification, "responseState" | "contentTag">,
+  corrected: CorrectionRequestType,
+): Promise<void> {
+  try {
+    const gmail = await getGmailClient();
+    const labelAllowlist = await gmail.refreshLabelAllowlist();
+
+    const previousLabelIds = [
+      labelAllowlist.get(responseStateLabelName(previous.responseState)),
+      labelAllowlist.get(contentTagLabelName(previous.contentTag)),
+    ].filter((id): id is string => Boolean(id));
+
+    const correctedLabelIds = [
+      labelAllowlist.get(responseStateLabelName(corrected.responseState)),
+      labelAllowlist.get(contentTagLabelName(corrected.contentTag)),
+    ].filter((id): id is string => Boolean(id));
+
+    if (correctedLabelIds.length === 0 && previousLabelIds.length === 0) {
+      return;
+    }
+
+    await gmail.batchModify(
+      [messageId],
+      correctedLabelIds,
+      previousLabelIds.filter((id) => !correctedLabelIds.includes(id)),
+    );
+  } catch (error) {
+    if (error instanceof GmailNotConfiguredError) {
+      console.log(
+        "Gmail not configured yet - skipping correction sync",
+        messageId,
+      );
+      return;
+    }
+    console.error(
+      "Failed to sync correction to Gmail (DynamoDB update already succeeded)",
+      messageId,
+      error,
+    );
+  }
 }
 
 async function handleCorrection(
@@ -195,6 +292,18 @@ async function handleCorrection(
         updatedParsed.error,
       );
       return jsonResponse(500, { error: "Internal server error" });
+    }
+
+    // Best-effort sync back to Gmail: DynamoDB is the primary store for a
+    // correction (already committed above), so a Gmail-side failure here is
+    // logged but must never fail the overall request - the human's
+    // correction is already durable regardless of Gmail's state.
+    if (!updatedParsed.data.isFixture) {
+      await syncCorrectionToGmail(
+        messageId,
+        existingParsed.data.classification,
+        correction,
+      );
     }
 
     return jsonResponse(200, updatedParsed.data);

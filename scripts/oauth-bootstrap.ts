@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 /**
  * Local, one-time, interactive script that runs Google's OAuth "Desktop app"
  * loopback consent flow and stores the resulting refresh token (plus the
@@ -200,10 +201,12 @@ function errorMessage(err: unknown): string {
 
 const isMainModule =
   process.argv[1] !== undefined &&
-  import.meta.url === new URL(process.argv[1], "file://").href;
+  import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMainModule) {
-  const secretsClient = new SecretsManagerClient({});
+  const secretsClient = new SecretsManagerClient({
+    region: process.env.AWS_REGION ?? "us-east-1",
+  });
   runBootstrap({
     env: process.env,
     consentFlow: runLoopbackConsentFlow,

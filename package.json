@@ -10,11 +10,7 @@
     "typecheck": "pnpm -r typecheck",
     "lint": "biome check ."
   },
-  "workspaces": [
-    "shared",
-    "services/*",
-    "web"
-  ],
+  "workspaces": ["shared", "services/*", "web"],
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "typescript": "^5.7.2"

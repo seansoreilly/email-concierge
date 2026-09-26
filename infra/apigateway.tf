@@ -11,12 +11,20 @@ resource "aws_apigatewayv2_api" "main" {
     allow_methods = ["GET", "POST", "OPTIONS"]
     allow_headers = ["Authorization", "Content-Type"]
   }
+
+  tags = {
+    Name = "${local.name_prefix}-api"
+  }
 }
 
 resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.main.id
   name        = "$default"
   auto_deploy = true
+
+  tags = {
+    Name = "${local.name_prefix}-api-default-stage"
+  }
 }
 
 # JWT authorizer backed by the Cognito user pool. Note: user_pool.endpoint has

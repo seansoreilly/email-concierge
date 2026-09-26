@@ -26,6 +26,10 @@ data "archive_file" "api" {
 resource "aws_iam_role" "poll" {
   name               = "${local.lambda_names.poll}-role"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  tags = {
+    Name = "${local.lambda_names.poll}-role"
+  }
 }
 
 resource "aws_iam_role_policy_attachment" "poll_basic_execution" {
@@ -86,6 +90,10 @@ resource "aws_lambda_function" "poll" {
       OPENROUTER_API_KEY     = var.openrouter_api_key
     }
   }
+
+  tags = {
+    Name = local.lambda_names.poll
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -95,6 +103,10 @@ resource "aws_lambda_function" "poll" {
 resource "aws_iam_role" "draft" {
   name               = "${local.lambda_names.draft}-role"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  tags = {
+    Name = "${local.lambda_names.draft}-role"
+  }
 }
 
 resource "aws_iam_role_policy_attachment" "draft_basic_execution" {
@@ -159,6 +171,10 @@ resource "aws_lambda_function" "draft" {
       OPENROUTER_API_KEY     = var.openrouter_api_key
     }
   }
+
+  tags = {
+    Name = local.lambda_names.draft
+  }
 }
 
 # DynamoDB Streams -> draft-lambda.
@@ -212,6 +228,10 @@ resource "aws_lambda_event_source_mapping" "emails_stream_to_draft" {
 resource "aws_iam_role" "api" {
   name               = "${local.lambda_names.api}-role"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  tags = {
+    Name = "${local.lambda_names.api}-role"
+  }
 }
 
 resource "aws_iam_role_policy_attachment" "api_basic_execution" {
@@ -263,6 +283,10 @@ resource "aws_lambda_function" "api" {
       EMAILS_TABLE_NAME      = aws_dynamodb_table.emails.name
       GMAIL_OAUTH_SECRET_ARN = aws_secretsmanager_secret.gmail_oauth.arn
     }
+  }
+
+  tags = {
+    Name = local.lambda_names.api
   }
 }
 

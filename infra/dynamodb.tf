@@ -13,6 +13,10 @@ resource "aws_dynamodb_table" "emails" {
 
   stream_enabled   = true
   stream_view_type = "NEW_IMAGE"
+
+  tags = {
+    Name = local.dynamodb_table_names.emails
+  }
 }
 
 # sync_state table: a single item holding the Gmail historyId cursor (pk = a
@@ -27,5 +31,9 @@ resource "aws_dynamodb_table" "sync_state" {
   attribute {
     name = "pk"
     type = "S"
+  }
+
+  tags = {
+    Name = local.dynamodb_table_names.sync_state
   }
 }

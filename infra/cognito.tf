@@ -23,6 +23,10 @@ resource "aws_cognito_user_pool" "main" {
       priority = 1
     }
   }
+
+  tags = {
+    Name = "${local.name_prefix}-users"
+  }
 }
 
 # Public SPA client - no secret, SRP auth (standard for browser apps that

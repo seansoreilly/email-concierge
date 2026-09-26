@@ -8,4 +8,8 @@ resource "aws_secretsmanager_secret" "gmail_oauth" {
   name                    = local.secret_names.gmail_oauth
   description             = "Gmail OAuth client id/secret/refresh token (populated by Phase 4 bootstrap script, not Terraform)"
   recovery_window_in_days = 0
+
+  tags = {
+    Name = local.secret_names.gmail_oauth
+  }
 }

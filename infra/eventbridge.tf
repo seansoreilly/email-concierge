@@ -37,6 +37,10 @@ resource "aws_iam_role" "scheduler_invoke" {
       Action = "sts:AssumeRole"
     }]
   })
+
+  tags = {
+    Name = "${local.name_prefix}-scheduler-invoke-role"
+  }
 }
 
 resource "aws_iam_role_policy" "scheduler_invoke" {

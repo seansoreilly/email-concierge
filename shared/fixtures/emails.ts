@@ -187,7 +187,7 @@ export const fixtureEmails: FixtureEmail[] = [
       precedence: "bulk",
     },
     expected: {
-      responseState: "Done",
+      responseState: "FYI",
       contentTag: "Newsletter",
       priorityMin: 2,
       priorityMax: 3,

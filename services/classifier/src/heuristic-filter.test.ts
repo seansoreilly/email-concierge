@@ -34,7 +34,7 @@ describe("classifyByHeuristic", () => {
     expect(result?.source).toBe("heuristic");
   });
 
-  it("classifies as Newsletter when a newsletter keyword matches", () => {
+  it("classifies as Newsletter/FYI when a newsletter keyword matches", () => {
     const result = classifyByHeuristic({
       from: "digest@techweekly.com",
       subject: "This Week in Tech: 12 stories",
@@ -42,6 +42,7 @@ describe("classifyByHeuristic", () => {
       headers: { listUnsubscribe: "<mailto:unsub@techweekly.com>" },
     });
     expect(result?.contentTag).toBe("Newsletter");
+    expect(result?.responseState).toBe("FYI");
   });
 
   it("matches every fixture email's expected label when the heuristic fires", () => {

@@ -27,8 +27,10 @@ export function classifyByHeuristic(
     haystack.includes(keyword),
   );
 
+  // Newsletters are informational content someone might still skim (FYI), whereas pure
+  // marketing/promo mail has nothing to act on or read later (Done) - resolved taxonomy decision.
   return {
-    responseState: "Done",
+    responseState: looksLikeNewsletter ? "FYI" : "Done",
     responseStateConfidence: 1,
     contentTag: looksLikeNewsletter ? "Newsletter" : "Bulk/Marketing",
     contentTagConfidence: 1,

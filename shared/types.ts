@@ -21,7 +21,12 @@ export type ContentTag = z.infer<typeof ContentTag>;
 export const Priority = z.number().int().min(2).max(10);
 export type Priority = z.infer<typeof Priority>;
 
-export const ClassificationSource = z.enum(["jev", "haiku", "heuristic"]);
+export const ClassificationSource = z.enum([
+  "jev",
+  "haiku",
+  "heuristic",
+  "human",
+]);
 export type ClassificationSource = z.infer<typeof ClassificationSource>;
 
 export const Classification = z.object({
@@ -34,22 +39,6 @@ export const Classification = z.object({
   source: ClassificationSource,
 });
 export type Classification = z.infer<typeof Classification>;
-
-export const EmailRecord = z.object({
-  messageId: z.string(),
-  threadId: z.string(),
-  from: z.string(),
-  subject: z.string(),
-  snippet: z.string(),
-  bodyText: z.string(),
-  receivedAt: z.string().datetime(),
-  classification: Classification,
-  appliedLabelIds: z.array(z.string()).default([]),
-  draftCreated: z.boolean().default(false),
-  draftId: z.string().optional(),
-  isFixture: z.boolean().default(false),
-});
-export type EmailRecord = z.infer<typeof EmailRecord>;
 
 export const CorrectionRecord = z.object({
   messageId: z.string(),
@@ -66,6 +55,31 @@ export const CorrectionRecord = z.object({
   }),
 });
 export type CorrectionRecord = z.infer<typeof CorrectionRecord>;
+
+export const EmailRecord = z.object({
+  messageId: z.string(),
+  threadId: z.string(),
+  from: z.string(),
+  subject: z.string(),
+  snippet: z.string(),
+  bodyText: z.string(),
+  receivedAt: z.string().datetime(),
+  classification: Classification,
+  appliedLabelIds: z.array(z.string()).default([]),
+  draftCreated: z.boolean().default(false),
+  draftId: z.string().optional(),
+  isFixture: z.boolean().default(false),
+  corrections: z.array(CorrectionRecord).default([]),
+});
+export type EmailRecord = z.infer<typeof EmailRecord>;
+
+// POST /emails/{messageId}/correction request body - the fields a human can override.
+export const CorrectionRequest = Classification.pick({
+  responseState: true,
+  contentTag: true,
+  priority: true,
+});
+export type CorrectionRequest = z.infer<typeof CorrectionRequest>;
 
 export const FixtureEmail = z.object({
   messageId: z.string(),

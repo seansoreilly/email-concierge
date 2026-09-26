@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+*.zip
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+crash.log
+crash.*.log
+.terraform.lock.hcl
+
+# Env/secrets
+.env
+.env.*
+!.env.example
+
+# Editor/OS
+.DS_Store
+*.swp
+
+# Claude Code local session artifacts
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+
+# Logs
+*.log

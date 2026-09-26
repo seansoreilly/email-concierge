@@ -43,7 +43,12 @@ export function App(): JSX.Element {
 
   if (status === "checking") {
     return (
-      <p style={{ padding: "2rem", fontFamily: "sans-serif" }}>Loading...</p>
+      <div className="app-loading">
+        <span className="mark">
+          <span className="mark-glyph">Concierge</span>
+          <span>checking session…</span>
+        </span>
+      </div>
     );
   }
 

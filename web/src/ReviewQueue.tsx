@@ -5,8 +5,13 @@ import {
   ResponseState,
 } from "@email-concierge/shared";
 import { fetchAuthSession, signOut } from "aws-amplify/auth";
+import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { apiUrlFor } from "./env";
+
+/** CSSProperties doesn't model custom properties; this narrow alias documents
+ *  that `--fill` is the one custom property the gauge bar's CSS reads. */
+type GaugeFillStyle = CSSProperties & { "--fill": string };
 
 interface ReviewQueueProps {
   onSignedOut: () => void;
@@ -15,6 +20,7 @@ interface ReviewQueueProps {
 // Priority is a contractually-fixed int range (shared/types.ts: z.number().int().min(2).max(10)).
 const PRIORITY_MIN = 2;
 const PRIORITY_MAX = 10;
+const PRIORITY_URGENT_THRESHOLD = 8;
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -23,21 +29,56 @@ const PRIORITY_OPTIONS: number[] = Array.from(
   (_, i) => PRIORITY_MIN + i,
 );
 
-/** Lowest of the three per-field confidences - the value the review queue sorts by. */
-function minConfidence(record: EmailRecord): number {
-  const { responseStateConfidence, contentTagConfidence, priorityConfidence } =
-    record.classification;
-  return Math.min(
-    responseStateConfidence,
-    contentTagConfidence,
-    priorityConfidence,
-  );
+interface ConfidenceField {
+  name: string;
+  value: number;
 }
 
-function confidenceColor(confidence: number): string {
-  if (confidence < 0.5) return "#b00020";
-  if (confidence < 0.8) return "#b8860b";
-  return "#2e7d32";
+/** The three independent confidences, in the order the gauge displays them. */
+function confidenceFields(record: EmailRecord): ConfidenceField[] {
+  const c = record.classification;
+  return [
+    { name: "Response", value: c.responseStateConfidence },
+    { name: "Tag", value: c.contentTagConfidence },
+    { name: "Priority", value: c.priorityConfidence },
+  ];
+}
+
+/** Lowest of the three per-field confidences - the value the review queue sorts by. */
+function minConfidence(record: EmailRecord): number {
+  return Math.min(...confidenceFields(record).map((f) => f.value));
+}
+
+function confidenceLevel(value: number): "low" | "mid" | "high" {
+  if (value < 0.5) return "low";
+  if (value < 0.8) return "mid";
+  return "high";
+}
+
+function sourceLabel(source: EmailRecord["classification"]["source"]): string {
+  switch (source) {
+    case "jev":
+      return "Classified by Jev";
+    case "haiku":
+      return "Classified by Haiku (fallback)";
+    case "heuristic":
+      return "Sorted by rule";
+    case "human":
+      return "Corrected by you";
+  }
+}
+
+function formatReceived(receivedAt: string): string {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(receivedAt));
+  } catch {
+    return receivedAt;
+  }
 }
 
 async function getIdToken(): Promise<string> {
@@ -47,6 +88,52 @@ async function getIdToken(): Promise<string> {
     throw new Error("No active session. Please sign in again.");
   }
   return token;
+}
+
+/** The three-tick confidence instrument - this queue's signature element.
+ *  Sorting is driven by the weakest of three independent scores, not one
+ *  blended number, so the gauge shows all three and marks the weakest. */
+function ConfidenceGauge({ record }: { record: EmailRecord }): JSX.Element {
+  const fields = confidenceFields(record);
+  const weakest = Math.min(...fields.map((f) => f.value));
+  // Only call out the weakest field when it's actually not-high-confidence -
+  // a fully-confident row (or an all-1 post-correction row) should read as
+  // quiet, not have one of its three ticks arbitrarily bolded by a tie.
+  const weakestIsNotable = confidenceLevel(weakest) !== "high";
+
+  return (
+    <div className="confidence-gauge">
+      <div className="gauge-track">
+        {fields.map((field) => {
+          const level = confidenceLevel(field.value);
+          const isWeakest = weakestIsNotable && field.value === weakest;
+          return (
+            <div
+              className="gauge-row"
+              key={field.name}
+              data-weakest={isWeakest}
+            >
+              <span className="gauge-name">{field.name}</span>
+              <span className="gauge-bar">
+                <span
+                  className="gauge-fill"
+                  data-level={level}
+                  style={
+                    {
+                      "--fill": `${field.value * 100}%`,
+                    } as GaugeFillStyle
+                  }
+                />
+              </span>
+              <span className="gauge-value">
+                {Math.round(field.value * 100)}%
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 interface CorrectionFormProps {
@@ -121,25 +208,17 @@ function CorrectionForm({ record, onSaved }: CorrectionFormProps): JSX.Element {
   }
 
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: "0.5rem",
-        alignItems: "center",
-        flexWrap: "wrap",
-        marginTop: "0.5rem",
-      }}
-    >
-      <label>
-        Response
+    <div className="correction-form">
+      <div className="correction-field">
+        <label htmlFor={`response-${record.messageId}`}>Response</label>
         <select
+          id={`response-${record.messageId}`}
           value={responseState}
           onChange={(e) =>
             setResponseState(
               e.target.value as (typeof ResponseState.options)[number],
             )
           }
-          style={{ marginLeft: "0.25rem" }}
         >
           {ResponseState.options.map((option) => (
             <option key={option} value={option}>
@@ -147,15 +226,15 @@ function CorrectionForm({ record, onSaved }: CorrectionFormProps): JSX.Element {
             </option>
           ))}
         </select>
-      </label>
-      <label>
-        Tag
+      </div>
+      <div className="correction-field">
+        <label htmlFor={`tag-${record.messageId}`}>Tag</label>
         <select
+          id={`tag-${record.messageId}`}
           value={contentTag}
           onChange={(e) =>
             setContentTag(e.target.value as (typeof ContentTag.options)[number])
           }
-          style={{ marginLeft: "0.25rem" }}
         >
           {ContentTag.options.map((option) => (
             <option key={option} value={option}>
@@ -163,13 +242,13 @@ function CorrectionForm({ record, onSaved }: CorrectionFormProps): JSX.Element {
             </option>
           ))}
         </select>
-      </label>
-      <label>
-        Priority
+      </div>
+      <div className="correction-field">
+        <label htmlFor={`priority-${record.messageId}`}>Priority</label>
         <select
+          id={`priority-${record.messageId}`}
           value={priority}
           onChange={(e) => setPriority(Number(e.target.value))}
-          style={{ marginLeft: "0.25rem" }}
         >
           {PRIORITY_OPTIONS.map((option) => (
             <option key={option} value={option}>
@@ -177,11 +256,16 @@ function CorrectionForm({ record, onSaved }: CorrectionFormProps): JSX.Element {
             </option>
           ))}
         </select>
-      </label>
-      <button type="button" onClick={() => void handleSave()} disabled={saving}>
-        {saving ? "Saving..." : "Save correction"}
+      </div>
+      <button
+        type="button"
+        className="btn-save"
+        onClick={() => void handleSave()}
+        disabled={saving}
+      >
+        {saving ? "Saving…" : "Save correction"}
       </button>
-      {error ? <span style={{ color: "#b00020" }}>{error}</span> : null}
+      {error ? <span className="correction-error">{error}</span> : null}
     </div>
   );
 }
@@ -192,64 +276,54 @@ interface EmailRowProps {
 }
 
 function EmailRow({ record, onSaved }: EmailRowProps): JSX.Element {
-  const confidence = minConfidence(record);
+  const { responseState, contentTag, priority, source } = record.classification;
+  const isUrgent = priority >= PRIORITY_URGENT_THRESHOLD;
 
   return (
-    <li
-      style={{
-        border: "1px solid #ccc",
-        borderRadius: 6,
-        padding: "0.75rem 1rem",
-        marginBottom: "0.75rem",
-        listStyle: "none",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: "1rem",
-        }}
-      >
-        <div>
-          <strong>{record.subject || "(no subject)"}</strong>
-          <div style={{ color: "#555", fontSize: "0.9rem" }}>{record.from}</div>
-        </div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.4rem",
-            whiteSpace: "nowrap",
-          }}
-        >
-          <span
-            aria-hidden="true"
-            style={{
-              display: "inline-block",
-              width: 10,
-              height: 10,
-              borderRadius: "50%",
-              backgroundColor: confidenceColor(confidence),
-            }}
-          />
-          <span>{Math.round(confidence * 100)}% confident</span>
-        </div>
+    <li className="email-row">
+      <div className="row-priority" data-urgent={isUrgent}>
+        {priority}
+        <span className="row-priority-label">pri</span>
       </div>
-      <p style={{ color: "#333" }}>{record.snippet}</p>
-      <div style={{ fontSize: "0.85rem", color: "#555" }}>
-        <span>{record.classification.responseState}</span>
-        {" | "}
-        <span>{record.classification.contentTag}</span>
-        {" | "}
-        <span>Priority {record.classification.priority}</span>
-        {" | "}
-        <span>source: {record.classification.source}</span>
-        {record.isFixture ? <span> | fixture</span> : null}
-        {" | "}
-        <span>draft {record.draftCreated ? "created" : "not created"}</span>
+      <div className="row-main">
+        <div className="row-top">
+          <div>
+            <h2 className="row-subject">{record.subject || "(no subject)"}</h2>
+            <div className="row-from">{record.from}</div>
+          </div>
+          <div className="row-received">
+            {formatReceived(record.receivedAt)}
+          </div>
+        </div>
+
+        <p className="row-snippet">{record.snippet}</p>
+
+        <ConfidenceGauge record={record} />
+
+        <div className="row-tags">
+          <span className="chip" data-state={responseState}>
+            {responseState}
+          </span>
+          <span className="chip chip-outline">{contentTag}</span>
+          <span className="meta-note">{sourceLabel(source)}</span>
+          {record.isFixture ? (
+            <span className="meta-note">· fixture data</span>
+          ) : null}
+          {responseState === "To Respond" ? (
+            <span
+              className="draft-flag"
+              data-created={record.draftCreated}
+              title="AI-generated draft - not sent. Review and send from Gmail yourself."
+            >
+              {record.draftCreated
+                ? "Draft ready in Gmail — not sent"
+                : "No draft yet"}
+            </span>
+          ) : null}
+        </div>
+
+        <CorrectionForm record={record} onSaved={onSaved} />
       </div>
-      <CorrectionForm record={record} onSaved={onSaved} />
     </li>
   );
 }
@@ -318,30 +392,40 @@ export function ReviewQueue({ onSignedOut }: ReviewQueueProps): JSX.Element {
   }
 
   return (
-    <div
-      style={{ maxWidth: 800, margin: "2rem auto", fontFamily: "sans-serif" }}
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <h1 style={{ fontSize: "1.25rem" }}>Review Queue</h1>
-        <button type="button" onClick={() => void handleSignOut()}>
-          Sign out
-        </button>
+    <div className="queue-shell">
+      <div className="queue-header">
+        <div className="queue-heading">
+          <p className="login-eyebrow">Email Concierge</p>
+          <h1 className="queue-title">Review queue</h1>
+        </div>
+        <div className="queue-actions">
+          {state === "ready" ? (
+            <span className="queue-count">
+              {emails.length} to review, weakest confidence first
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => void handleSignOut()}
+          >
+            Sign out
+          </button>
+        </div>
       </div>
 
-      {state === "loading" ? <p>Loading emails...</p> : null}
-      {state === "error" ? <p style={{ color: "#b00020" }}>{error}</p> : null}
+      {state === "loading" ? (
+        <p className="queue-status">Loading emails…</p>
+      ) : null}
+      {state === "error" ? (
+        <p className="queue-status is-error">{error}</p>
+      ) : null}
 
       {state === "ready" ? (
         emails.length === 0 ? (
-          <p>No emails to review.</p>
+          <p className="queue-empty">Nothing to review right now.</p>
         ) : (
-          <ul style={{ padding: 0 }}>
+          <ul className="queue-list">
             {emails.map((record) => (
               <EmailRow
                 key={record.messageId}

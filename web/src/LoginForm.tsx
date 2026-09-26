@@ -53,47 +53,43 @@ export function LoginForm({ onSignedIn }: LoginFormProps): JSX.Element {
   }
 
   return (
-    <div
-      style={{ maxWidth: 360, margin: "4rem auto", fontFamily: "sans-serif" }}
-    >
-      <h1 style={{ fontSize: "1.25rem" }}>Email Concierge - Sign in</h1>
-      <form
-        onSubmit={handleSubmit}
-        style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}
-      >
-        <label htmlFor="email">
-          Email
-          <input
-            id="email"
-            type="email"
-            required
-            autoComplete="username"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={{ width: "100%", padding: "0.5rem", marginTop: "0.25rem" }}
-          />
-        </label>
-        <label htmlFor="password">
-          Password
-          <input
-            id="password"
-            type="password"
-            required
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={{ width: "100%", padding: "0.5rem", marginTop: "0.25rem" }}
-          />
-        </label>
-        {error ? <p style={{ color: "#b00020" }}>{error}</p> : null}
-        <button
-          type="submit"
-          disabled={submitting}
-          style={{ padding: "0.5rem" }}
-        >
-          {submitting ? "Signing in..." : "Sign in"}
-        </button>
-      </form>
+    <div className="login-screen">
+      <div className="login-card">
+        <p className="login-eyebrow">Email Concierge</p>
+        <h1 className="login-title">Sign in to review the queue</h1>
+        <form onSubmit={handleSubmit}>
+          <div className="field">
+            <label className="field-label" htmlFor="email">
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              required
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="password">
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              required
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+          {error ? <p className="form-error">{error}</p> : null}
+          <button type="submit" className="btn-primary" disabled={submitting}>
+            {submitting ? "Signing in…" : "Sign in"}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

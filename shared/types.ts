@@ -18,7 +18,10 @@ export const ContentTag = z.enum([
 ]);
 export type ContentTag = z.infer<typeof ContentTag>;
 
-export const Priority = z.number().int().min(2).max(10);
+export const PRIORITY_MIN = 2;
+export const PRIORITY_MAX = 10;
+
+export const Priority = z.number().int().min(PRIORITY_MIN).max(PRIORITY_MAX);
 export type Priority = z.infer<typeof Priority>;
 
 export const ClassificationSource = z.enum([
@@ -29,30 +32,32 @@ export const ClassificationSource = z.enum([
 ]);
 export type ClassificationSource = z.infer<typeof ClassificationSource>;
 
+export const Confidence = z.number().min(0).max(1);
+export type Confidence = z.infer<typeof Confidence>;
+
 export const Classification = z.object({
   responseState: ResponseState,
-  responseStateConfidence: z.number().min(0).max(1),
+  responseStateConfidence: Confidence,
   contentTag: ContentTag,
-  contentTagConfidence: z.number().min(0).max(1),
+  contentTagConfidence: Confidence,
   priority: Priority,
-  priorityConfidence: z.number().min(0).max(1),
+  priorityConfidence: Confidence,
   source: ClassificationSource,
 });
 export type Classification = z.infer<typeof Classification>;
 
+export const EditableClassification = Classification.pick({
+  responseState: true,
+  contentTag: true,
+  priority: true,
+});
+export type EditableClassification = z.infer<typeof EditableClassification>;
+
 export const CorrectionRecord = z.object({
   messageId: z.string(),
   correctedAt: z.string().datetime(),
-  previous: Classification.pick({
-    responseState: true,
-    contentTag: true,
-    priority: true,
-  }),
-  corrected: Classification.pick({
-    responseState: true,
-    contentTag: true,
-    priority: true,
-  }),
+  previous: EditableClassification,
+  corrected: EditableClassification,
 });
 export type CorrectionRecord = z.infer<typeof CorrectionRecord>;
 
@@ -74,11 +79,7 @@ export const EmailRecord = z.object({
 export type EmailRecord = z.infer<typeof EmailRecord>;
 
 // POST /emails/{messageId}/correction request body - the fields a human can override.
-export const CorrectionRequest = Classification.pick({
-  responseState: true,
-  contentTag: true,
-  priority: true,
-});
+export const CorrectionRequest = EditableClassification;
 export type CorrectionRequest = z.infer<typeof CorrectionRequest>;
 
 export const FixtureEmail = z.object({

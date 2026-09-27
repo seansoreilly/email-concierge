@@ -1,6 +1,8 @@
 import {
   type Classification,
   ContentTag,
+  PRIORITY_MAX,
+  PRIORITY_MIN,
   ResponseState,
 } from "@email-concierge/shared/types.ts";
 import { z } from "zod";
@@ -13,12 +15,14 @@ const JEV_MODEL = "typesafe/jev-1.13";
 
 // Confirmed via direct fetch of openrouter.ai's decisions API reference (submit-a-decisions-questions-and-answers-request):
 // choice answers carry {type, choice, confidence, probabilities}; score answers carry {type, score, confidence, probabilities, legend}.
-const ChoiceAnswer = z.object({
-  type: z.literal("choice"),
-  choice: z.string(),
-  confidence: z.number().min(0).max(1),
-  probabilities: z.record(z.string(), z.number()),
-});
+function choiceAnswer<T extends z.ZodTypeAny>(choice: T) {
+  return z.object({
+    type: z.literal("choice"),
+    choice,
+    confidence: z.number().min(0).max(1),
+    probabilities: z.record(z.string(), z.number()),
+  });
+}
 
 const ScoreAnswer = z.object({
   type: z.literal("score"),
@@ -36,8 +40,8 @@ const DecisionsResponse = z.object({
   model: z.string().optional(),
   provider: z.string().optional(),
   answers: z.object({
-    response_state: ChoiceAnswer,
-    content_tag: ChoiceAnswer,
+    response_state: choiceAnswer(ResponseState),
+    content_tag: choiceAnswer(ContentTag),
     priority: ScoreAnswer,
   }),
   usage: z
@@ -101,9 +105,11 @@ export class JevClassifier implements Classifier {
         },
         priority: {
           type: "score",
-          instructions:
-            "Score how urgent/important this email is on a 2 (lowest) to 10 (highest) scale.",
-          criteria: Array.from({ length: 9 }, (_, i) => String(i + 2)),
+          instructions: `Score how urgent/important this email is on a ${PRIORITY_MIN} (lowest) to ${PRIORITY_MAX} (highest) scale.`,
+          criteria: Array.from(
+            { length: PRIORITY_MAX - PRIORITY_MIN + 1 },
+            (_, i) => String(i + PRIORITY_MIN),
+          ),
         },
       },
     };
@@ -159,28 +165,10 @@ export class JevClassifier implements Classifier {
   private toClassification(
     data: z.infer<typeof DecisionsResponse>,
   ): Classification {
-    const responseStateResult = ResponseState.safeParse(
-      data.answers.response_state.choice,
-    );
-    if (!responseStateResult.success) {
-      throw new JevResponseError(
-        `Jev returned an unrecognized response_state choice: ${data.answers.response_state.choice}`,
-      );
-    }
-
-    const contentTagResult = ContentTag.safeParse(
-      data.answers.content_tag.choice,
-    );
-    if (!contentTagResult.success) {
-      throw new JevResponseError(
-        `Jev returned an unrecognized content_tag choice: ${data.answers.content_tag.choice}`,
-      );
-    }
-
     return {
-      responseState: responseStateResult.data,
+      responseState: data.answers.response_state.choice,
       responseStateConfidence: data.answers.response_state.confidence,
-      contentTag: contentTagResult.data,
+      contentTag: data.answers.content_tag.choice,
       contentTagConfidence: data.answers.content_tag.confidence,
       priority: this.resolvePriority(data.answers.priority),
       priorityConfidence: data.answers.priority.confidence,

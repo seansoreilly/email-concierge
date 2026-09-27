@@ -55,35 +55,50 @@ beforeEach(() => {
   ddbMock.reset();
 });
 
+/**
+ * Builds an APIGatewayProxyEventV2 for a route, deriving the repeated
+ * requestContext (account/api ids, http block, routeKey, stage, timestamps)
+ * from just the method, path, and routeKey - the fields tests actually vary.
+ */
 function makeEvent(
-  overrides: Partial<APIGatewayProxyEventV2> = {},
+  options: {
+    routeKey?: string;
+    path?: string;
+    method?: string;
+    body?: string;
+    pathParameters?: Record<string, string>;
+  } = {},
 ): APIGatewayProxyEventV2 {
+  const routeKey = options.routeKey ?? "GET /emails";
+  const path = options.path ?? "/emails";
+  const method = options.method ?? "GET";
   return {
     version: "2.0",
-    routeKey: "GET /emails",
-    rawPath: "/emails",
+    routeKey,
+    rawPath: path,
     rawQueryString: "",
     headers: {},
+    pathParameters: options.pathParameters,
+    body: options.body,
     requestContext: {
       accountId: "123456789012",
       apiId: "api-id",
       domainName: "api-id.execute-api.us-east-1.amazonaws.com",
       domainPrefix: "api-id",
       http: {
-        method: "GET",
-        path: "/emails",
+        method,
+        path,
         protocol: "HTTP/1.1",
         sourceIp: "127.0.0.1",
         userAgent: "vitest",
       },
       requestId: "request-id",
-      routeKey: "GET /emails",
+      routeKey,
       stage: "$default",
       time: "26/Sep/2026:00:00:00 +0000",
       timeEpoch: 1700000000000,
     },
     isBase64Encoded: false,
-    ...overrides,
   };
 }
 
@@ -146,27 +161,10 @@ describe("POST /emails/{messageId}/correction", () => {
   ): APIGatewayProxyEventV2 =>
     makeEvent({
       routeKey: "POST /emails/{messageId}/correction",
-      rawPath: `/emails/${messageId}/correction`,
+      path: `/emails/${messageId}/correction`,
+      method: "POST",
       pathParameters: { messageId },
       body,
-      requestContext: {
-        accountId: "123456789012",
-        apiId: "api-id",
-        domainName: "api-id.execute-api.us-east-1.amazonaws.com",
-        domainPrefix: "api-id",
-        http: {
-          method: "POST",
-          path: `/emails/${messageId}/correction`,
-          protocol: "HTTP/1.1",
-          sourceIp: "127.0.0.1",
-          userAgent: "vitest",
-        },
-        requestId: "request-id",
-        routeKey: "POST /emails/{messageId}/correction",
-        stage: "$default",
-        time: "26/Sep/2026:00:00:00 +0000",
-        timeEpoch: 1700000000000,
-      },
     });
 
   it("updates and returns the record for a valid body", async () => {
@@ -303,31 +301,14 @@ describe("Gmail sync on correction", () => {
   const correctionEventFor = (messageId: string): APIGatewayProxyEventV2 =>
     makeEvent({
       routeKey: "POST /emails/{messageId}/correction",
-      rawPath: `/emails/${messageId}/correction`,
+      path: `/emails/${messageId}/correction`,
+      method: "POST",
       pathParameters: { messageId },
       body: JSON.stringify({
         responseState: "Done",
         contentTag: "Work",
         priority: 3,
       }),
-      requestContext: {
-        accountId: "123456789012",
-        apiId: "api-id",
-        domainName: "api-id.execute-api.us-east-1.amazonaws.com",
-        domainPrefix: "api-id",
-        http: {
-          method: "POST",
-          path: `/emails/${messageId}/correction`,
-          protocol: "HTTP/1.1",
-          sourceIp: "127.0.0.1",
-          userAgent: "vitest",
-        },
-        requestId: "request-id",
-        routeKey: "POST /emails/{messageId}/correction",
-        stage: "$default",
-        time: "26/Sep/2026:00:00:00 +0000",
-        timeEpoch: 1700000000000,
-      },
     });
 
   function makeFakeGmailClient() {
@@ -423,25 +404,7 @@ describe("unmatched routes", () => {
       await makeHandler()(
         makeEvent({
           routeKey: "$default",
-          rawPath: "/unknown",
-          requestContext: {
-            accountId: "123456789012",
-            apiId: "api-id",
-            domainName: "api-id.execute-api.us-east-1.amazonaws.com",
-            domainPrefix: "api-id",
-            http: {
-              method: "GET",
-              path: "/unknown",
-              protocol: "HTTP/1.1",
-              sourceIp: "127.0.0.1",
-              userAgent: "vitest",
-            },
-            requestId: "request-id",
-            routeKey: "$default",
-            stage: "$default",
-            time: "26/Sep/2026:00:00:00 +0000",
-            timeEpoch: 1700000000000,
-          },
+          path: "/unknown",
         }),
       ),
     );

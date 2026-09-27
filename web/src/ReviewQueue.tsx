@@ -2,6 +2,8 @@ import type { CorrectionRequest, EmailRecord } from "@email-concierge/shared";
 import {
   ContentTag,
   EmailRecord as EmailRecordSchema,
+  PRIORITY_MAX,
+  PRIORITY_MIN,
   ResponseState,
 } from "@email-concierge/shared";
 import { fetchAuthSession, signOut } from "aws-amplify/auth";
@@ -13,9 +15,6 @@ import { apiUrlFor } from "./env";
  *  that `--fill` is the one custom property the gauge bar's CSS reads. */
 type GaugeFillStyle = CSSProperties & { "--fill": string };
 
-// Priority is a contractually-fixed int range (shared/types.ts: z.number().int().min(2).max(10)).
-const PRIORITY_MIN = 2;
-const PRIORITY_MAX = 10;
 const PRIORITY_URGENT_THRESHOLD = 8;
 
 type LoadState = "loading" | "ready" | "error";

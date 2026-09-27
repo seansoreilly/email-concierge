@@ -112,9 +112,11 @@ button {
   display: grid;
   place-items: center;
   padding: 1.5rem;
-  background:
-    radial-gradient(circle at 15% 20%, var(--accent-soft), transparent 55%),
-    var(--paper);
+  background: radial-gradient(
+      circle at 15% 20%,
+      var(--accent-soft),
+      transparent 55%
+    ), var(--paper);
 }
 
 .login-card {
@@ -313,9 +315,7 @@ button {
   font-size: 0.82rem;
   font-weight: 600;
   white-space: nowrap;
-  transition:
-    border-color 120ms ease,
-    color 120ms ease;
+  transition: border-color 120ms ease, color 120ms ease;
 }
 
 .btn-ghost:hover {

@@ -67,10 +67,11 @@ async function authenticatedJsonRequest(
 /** A plausible starting reply, since the backend doesn't generate or store
  *  drafted reply text yet - this only exists client-side to make the
  *  drafted-reply panel editable. */
-function defaultDraftReply(record: EmailRecord): string {
+function defaultDraftReply(record: EmailRecord, signerName: string): string {
   const { name } = parseFrom(record.from);
   const firstName = name.split(" ")[0] || "there";
-  return `Hi ${firstName},\n\nThanks for the note — I'll take a look and get back to you shortly.\n\nBest,\nSean`;
+  const signer = signerName.split(" ")[0] || signerName;
+  return `Hi ${firstName},\n\nThanks for the note — I'll take a look and get back to you shortly.\n\nBest,\n${signer}`;
 }
 
 interface SidebarProps {
@@ -132,6 +133,7 @@ function Sidebar({
 }
 
 interface EmailListProps {
+  title: string;
   emails: EmailRecord[];
   selectedId: string | null;
   onSelect: (messageId: string) => void;
@@ -139,27 +141,21 @@ interface EmailListProps {
   onFilterChange: (filter: ListFilter) => void;
 }
 
+/** Filtering lives in the parent (ReviewQueue) so that queue-switching,
+ *  approve/reject next-selection, and the detail-pane fallback all agree
+ *  on which emails are actually visible - this component only renders. */
 function EmailList({
+  title,
   emails,
   selectedId,
   onSelect,
   filter,
   onFilterChange,
 }: EmailListProps): JSX.Element {
-  const filtered = useMemo(() => {
-    if (filter === "high-confidence") {
-      return emails.filter((e) => confidenceLevel(minConfidence(e)) === "high");
-    }
-    if (filter === "needs-attention") {
-      return emails.filter((e) => confidenceLevel(minConfidence(e)) !== "high");
-    }
-    return emails;
-  }, [emails, filter]);
-
   return (
     <div className="email-list-pane">
       <div className="email-list-header">
-        <h1 className="email-list-title">Needs review</h1>
+        <h1 className="email-list-title">{title}</h1>
         <span className="email-list-count">{emails.length} emails</span>
       </div>
       <div className="filter-chips">
@@ -189,10 +185,10 @@ function EmailList({
         </button>
       </div>
       <ul className="email-list">
-        {filtered.length === 0 ? (
+        {emails.length === 0 ? (
           <li className="email-list-empty">Nothing here.</li>
         ) : (
-          filtered.map((record) => {
+          emails.map((record) => {
             const { name } = parseFrom(record.from);
             const match = Math.round(minConfidence(record) * 100);
             return (
@@ -470,21 +466,22 @@ export function ReviewQueue(): JSX.Element {
         const initialSort = sortByConfidence(parsed);
 
         if (!cancelled) {
-          setEmails(initialSort);
-          setDraftByEmail(
-            new Map(
-              initialSort.map((record) => [
-                record.messageId,
-                defaultDraftReply(record),
-              ]),
-            ),
-          );
-          setSelectedId(initialSort[0]?.messageId ?? null);
           const idPayload = session.tokens?.idToken?.payload;
           const name =
             (typeof idPayload?.name === "string" && idPayload.name) ||
             (typeof idPayload?.email === "string" && idPayload.email) ||
             "Reviewer";
+
+          setEmails(initialSort);
+          setDraftByEmail(
+            new Map(
+              initialSort.map((record) => [
+                record.messageId,
+                defaultDraftReply(record, name),
+              ]),
+            ),
+          );
+          setSelectedId(initialSort[0]?.messageId ?? null);
           setUserName(name);
           setState("ready");
         }
@@ -513,6 +510,23 @@ export function ReviewQueue(): JSX.Element {
       ),
     [emails, statusByEmail, activeQueue],
   );
+
+  /** The queue's emails further narrowed by the confidence chip - this is
+   *  what's actually on screen, so it drives the list, next-selection after
+   *  an action, and the detail-pane fallback alike. */
+  const visibleEmails = useMemo(() => {
+    if (listFilter === "high-confidence") {
+      return queueEmails.filter(
+        (e) => confidenceLevel(minConfidence(e)) === "high",
+      );
+    }
+    if (listFilter === "needs-attention") {
+      return queueEmails.filter(
+        (e) => confidenceLevel(minConfidence(e)) !== "high",
+      );
+    }
+    return queueEmails;
+  }, [queueEmails, listFilter]);
 
   const counts = useMemo(() => {
     const result: Record<QueueStatus, number> = {
@@ -546,7 +560,7 @@ export function ReviewQueue(): JSX.Element {
     setStatusByEmail((current) => new Map(current).set(messageId, status));
     setSelectedId((current) => {
       if (current !== messageId) return current;
-      const remaining = queueEmails.filter((e) => e.messageId !== messageId);
+      const remaining = visibleEmails.filter((e) => e.messageId !== messageId);
       return remaining[0]?.messageId ?? null;
     });
   }
@@ -556,9 +570,12 @@ export function ReviewQueue(): JSX.Element {
   }
 
   const selectedRecord =
-    queueEmails.find((e) => e.messageId === selectedId) ??
-    queueEmails[0] ??
+    visibleEmails.find((e) => e.messageId === selectedId) ??
+    visibleEmails[0] ??
     null;
+
+  const activeQueueLabel =
+    QUEUE_ORDER.find((q) => q.status === activeQueue)?.label ?? "";
 
   return (
     <div className="app-shell">
@@ -582,7 +599,8 @@ export function ReviewQueue(): JSX.Element {
             onSignOut={() => void handleSignOut()}
           />
           <EmailList
-            emails={queueEmails}
+            title={activeQueueLabel}
+            emails={visibleEmails}
             selectedId={selectedRecord?.messageId ?? null}
             onSelect={setSelectedId}
             filter={listFilter}
@@ -590,6 +608,7 @@ export function ReviewQueue(): JSX.Element {
           />
           {selectedRecord ? (
             <EmailDetail
+              key={selectedRecord.messageId}
               record={selectedRecord}
               draftReply={draftByEmail.get(selectedRecord.messageId) ?? ""}
               onDraftChange={handleDraftChange}

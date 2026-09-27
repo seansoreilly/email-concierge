@@ -97,26 +97,28 @@ describe("sourceLabel", () => {
 });
 
 describe("formatReceived", () => {
-  const now = new Date("2026-09-27T18:00:00.000Z");
+  // Noon UTC falls on the same calendar day in every zone from UTC-11 to
+  // UTC+11, so these fixtures are timezone-safe wherever the tests run.
+  const now = new Date("2026-09-27T12:00:00.000Z");
 
   it("formats today's timestamp as a time of day", () => {
-    const formatted = formatReceived("2026-09-27T09:42:00.000Z", now);
-    expect(formatted).not.toBe("2026-09-27T09:42:00.000Z");
+    const formatted = formatReceived("2026-09-27T12:00:00.000Z", now);
+    expect(formatted).not.toBe("2026-09-27T12:00:00.000Z");
     expect(formatted.length).toBeGreaterThan(0);
   });
 
   it("formats yesterday as 'Yest'", () => {
-    expect(formatReceived("2026-09-26T09:42:00.000Z", now)).toBe("Yest");
+    expect(formatReceived("2026-09-26T12:00:00.000Z", now)).toBe("Yest");
   });
 
   it("formats within the last week as a weekday name", () => {
-    const formatted = formatReceived("2026-09-23T09:42:00.000Z", now);
+    const formatted = formatReceived("2026-09-23T12:00:00.000Z", now);
     expect(formatted).not.toBe("Yest");
     expect(formatted.length).toBeGreaterThan(0);
   });
 
   it("formats older dates as a short date", () => {
-    const formatted = formatReceived("2026-01-01T09:42:00.000Z", now);
+    const formatted = formatReceived("2026-01-01T12:00:00.000Z", now);
     expect(formatted).toContain("Jan");
   });
 

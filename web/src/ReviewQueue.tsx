@@ -7,25 +7,25 @@ import {
   ResponseState,
 } from "@email-concierge/shared";
 import { fetchAuthSession, signOut } from "aws-amplify/auth";
-import type { CSSProperties } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { apiUrlFor } from "./env";
 import {
-  confidenceFields,
   confidenceLevel,
   formatReceived,
+  initials,
   minConfidence,
+  parseFrom,
   sortByConfidence,
   sourceLabel,
 } from "./queue-logic";
 
-/** CSSProperties doesn't model custom properties; this narrow alias documents
- *  that `--fill` is the one custom property the gauge bar's CSS reads. */
-type GaugeFillStyle = CSSProperties & { "--fill": string };
-
-const PRIORITY_URGENT_THRESHOLD = 8;
-
 type LoadState = "loading" | "ready" | "error";
+
+/** Where a reviewed email sits, tracked client-side only: the API has no
+ *  concept of approve/reject/send yet, so this never leaves the browser. */
+type QueueStatus = "needs-review" | "approved" | "sent" | "rejected";
+
+type ListFilter = "all" | "high-confidence" | "needs-attention";
 
 const PRIORITY_OPTIONS: number[] = Array.from(
   { length: PRIORITY_MAX - PRIORITY_MIN + 1 },
@@ -64,58 +64,181 @@ async function authenticatedJsonRequest(
   return (await response.json()) as unknown;
 }
 
-/** The three-tick confidence instrument - this queue's signature element.
- *  Sorting is driven by the weakest of three independent scores, not one
- *  blended number, so the gauge shows all three and marks the weakest. */
-function ConfidenceGauge({ record }: { record: EmailRecord }): JSX.Element {
-  const fields = confidenceFields(record);
-  const weakest = Math.min(...fields.map((f) => f.value));
-  // Only call out the weakest field when it's actually not-high-confidence -
-  // a fully-confident row (or an all-1 post-correction row) should read as
-  // quiet, not have one of its three ticks arbitrarily bolded by a tie.
-  const weakestIsNotable = confidenceLevel(weakest) !== "high";
+/** A plausible starting reply, since the backend doesn't generate or store
+ *  drafted reply text yet - this only exists client-side to make the
+ *  drafted-reply panel editable. */
+function defaultDraftReply(record: EmailRecord, signerName: string): string {
+  const { name } = parseFrom(record.from);
+  const firstName = name.split(" ")[0] || "there";
+  const signer = signerName.split(" ")[0] || signerName;
+  return `Hi ${firstName},\n\nThanks for the note — I'll take a look and get back to you shortly.\n\nBest,\n${signer}`;
+}
 
+interface SidebarProps {
+  userName: string;
+  counts: Record<QueueStatus, number>;
+  activeQueue: QueueStatus;
+  onSelectQueue: (queue: QueueStatus) => void;
+  onSignOut: () => void;
+}
+
+const QUEUE_ORDER: { status: QueueStatus; label: string }[] = [
+  { status: "needs-review", label: "Needs review" },
+  { status: "approved", label: "Approved" },
+  { status: "sent", label: "Sent" },
+  { status: "rejected", label: "Rejected" },
+];
+
+function Sidebar({
+  userName,
+  counts,
+  activeQueue,
+  onSelectQueue,
+  onSignOut,
+}: SidebarProps): JSX.Element {
   return (
-    <div className="confidence-gauge">
-      <div className="gauge-track">
-        {fields.map((field) => {
-          const level = confidenceLevel(field.value);
-          const isWeakest = weakestIsNotable && field.value === weakest;
-          return (
-            <div
-              className="gauge-row"
-              key={field.name}
-              data-weakest={isWeakest}
-            >
-              <span className="gauge-name">{field.name}</span>
-              <span className="gauge-bar">
-                <span
-                  className="gauge-fill"
-                  data-level={level}
-                  style={
-                    {
-                      "--fill": `${field.value * 100}%`,
-                    } as GaugeFillStyle
-                  }
-                />
-              </span>
-              <span className="gauge-value">
-                {Math.round(field.value * 100)}%
-              </span>
-            </div>
-          );
-        })}
+    <nav className="sidebar">
+      <div className="sidebar-brand">
+        <span className="sidebar-mark">E</span>
+        <span>Concierge</span>
       </div>
+      <p className="sidebar-section-label">Queues</p>
+      <ul className="sidebar-queues">
+        {QUEUE_ORDER.map(({ status, label }) => (
+          <li key={status}>
+            <button
+              type="button"
+              className="sidebar-queue-btn"
+              data-active={status === activeQueue}
+              onClick={() => onSelectQueue(status)}
+            >
+              <span>{label}</span>
+              <span className="sidebar-queue-count">{counts[status]}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <div className="sidebar-footer">
+        <span className="sidebar-avatar">{initials(userName)}</span>
+        <div className="sidebar-user">
+          <span className="sidebar-user-name">{userName}</span>
+          <span className="sidebar-user-role">Reviewer</span>
+        </div>
+        <button type="button" className="btn-ghost" onClick={onSignOut}>
+          Sign out
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+interface EmailListProps {
+  title: string;
+  emails: EmailRecord[];
+  selectedId: string | null;
+  onSelect: (messageId: string) => void;
+  filter: ListFilter;
+  onFilterChange: (filter: ListFilter) => void;
+}
+
+/** Filtering lives in the parent (ReviewQueue) so that queue-switching,
+ *  approve/reject next-selection, and the detail-pane fallback all agree
+ *  on which emails are actually visible - this component only renders. */
+function EmailList({
+  title,
+  emails,
+  selectedId,
+  onSelect,
+  filter,
+  onFilterChange,
+}: EmailListProps): JSX.Element {
+  return (
+    <div className="email-list-pane">
+      <div className="email-list-header">
+        <h1 className="email-list-title">{title}</h1>
+        <span className="email-list-count">{emails.length} emails</span>
+      </div>
+      <div className="filter-chips">
+        <button
+          type="button"
+          className="filter-chip"
+          data-active={filter === "all"}
+          onClick={() => onFilterChange("all")}
+        >
+          All
+        </button>
+        <button
+          type="button"
+          className="filter-chip"
+          data-active={filter === "high-confidence"}
+          onClick={() => onFilterChange("high-confidence")}
+        >
+          High confidence
+        </button>
+        <button
+          type="button"
+          className="filter-chip"
+          data-active={filter === "needs-attention"}
+          onClick={() => onFilterChange("needs-attention")}
+        >
+          Needs attention
+        </button>
+      </div>
+      <ul className="email-list">
+        {emails.length === 0 ? (
+          <li className="email-list-empty">Nothing here.</li>
+        ) : (
+          emails.map((record) => {
+            const { name } = parseFrom(record.from);
+            const match = Math.round(minConfidence(record) * 100);
+            return (
+              <li key={record.messageId}>
+                <button
+                  type="button"
+                  className="email-list-item"
+                  data-active={record.messageId === selectedId}
+                  onClick={() => onSelect(record.messageId)}
+                >
+                  <div className="email-list-item-top">
+                    <span className="email-list-item-from">{name}</span>
+                    <span className="email-list-item-time">
+                      {formatReceived(record.receivedAt)}
+                    </span>
+                  </div>
+                  <div className="email-list-item-subject">
+                    {record.subject || "(no subject)"}
+                  </div>
+                  <p className="email-list-item-snippet">{record.snippet}</p>
+                  <div className="email-list-item-meta">
+                    <span className="tag-chip">
+                      {record.classification.contentTag}
+                    </span>
+                    <span
+                      className="match-chip"
+                      data-level={confidenceLevel(match / 100)}
+                    >
+                      {match}% match
+                    </span>
+                  </div>
+                </button>
+              </li>
+            );
+          })
+        )}
+      </ul>
     </div>
   );
 }
 
-interface CorrectionFormProps {
+interface CorrectionBarProps {
   record: EmailRecord;
   onSaved: (updated: EmailRecord) => void;
 }
 
-function CorrectionForm({ record, onSaved }: CorrectionFormProps): JSX.Element {
+/** Compact classification-correction control - the one thing this app
+ *  actually persists to the backend. Kept in the detail header since the
+ *  new layout has no other place for it. */
+function CorrectionBar({ record, onSaved }: CorrectionBarProps): JSX.Element {
   const [responseState, setResponseState] = useState(
     record.classification.responseState,
   );
@@ -141,8 +264,7 @@ function CorrectionForm({ record, onSaved }: CorrectionFormProps): JSX.Element {
           body: JSON.stringify(body),
         },
       );
-      const parsed = EmailRecordSchema.parse(json);
-      onSaved(parsed);
+      onSaved(EmailRecordSchema.parse(json));
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Save failed. Please try again.",
@@ -153,58 +275,49 @@ function CorrectionForm({ record, onSaved }: CorrectionFormProps): JSX.Element {
   }
 
   return (
-    <div className="correction-form">
-      <div className="correction-field">
-        <label htmlFor={`response-${record.messageId}`}>Response</label>
-        <select
-          id={`response-${record.messageId}`}
-          value={responseState}
-          onChange={(e) =>
-            setResponseState(
-              e.target.value as (typeof ResponseState.options)[number],
-            )
-          }
-        >
-          {ResponseState.options.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="correction-field">
-        <label htmlFor={`tag-${record.messageId}`}>Tag</label>
-        <select
-          id={`tag-${record.messageId}`}
-          value={contentTag}
-          onChange={(e) =>
-            setContentTag(e.target.value as (typeof ContentTag.options)[number])
-          }
-        >
-          {ContentTag.options.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="correction-field">
-        <label htmlFor={`priority-${record.messageId}`}>Priority</label>
-        <select
-          id={`priority-${record.messageId}`}
-          value={priority}
-          onChange={(e) => setPriority(Number(e.target.value))}
-        >
-          {PRIORITY_OPTIONS.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
-      </div>
+    <div className="correction-bar">
+      <select
+        aria-label="Response"
+        value={responseState}
+        onChange={(e) =>
+          setResponseState(
+            e.target.value as (typeof ResponseState.options)[number],
+          )
+        }
+      >
+        {ResponseState.options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label="Tag"
+        value={contentTag}
+        onChange={(e) =>
+          setContentTag(e.target.value as (typeof ContentTag.options)[number])
+        }
+      >
+        {ContentTag.options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label="Priority"
+        value={priority}
+        onChange={(e) => setPriority(Number(e.target.value))}
+      >
+        {PRIORITY_OPTIONS.map((option) => (
+          <option key={option} value={option}>
+            P{option}
+          </option>
+        ))}
+      </select>
       <button
         type="button"
-        className="btn-save"
+        className="btn-ghost"
         onClick={() => void handleSave()}
         disabled={saving}
       >
@@ -215,61 +328,112 @@ function CorrectionForm({ record, onSaved }: CorrectionFormProps): JSX.Element {
   );
 }
 
-interface EmailRowProps {
+interface EmailDetailProps {
   record: EmailRecord;
+  draftReply: string;
+  onDraftChange: (messageId: string, text: string) => void;
   onSaved: (updated: EmailRecord) => void;
+  onApproveAndSend: (messageId: string) => void;
+  onReject: (messageId: string) => void;
 }
 
-function EmailRow({ record, onSaved }: EmailRowProps): JSX.Element {
-  const { responseState, contentTag, priority, source } = record.classification;
-  const isUrgent = priority >= PRIORITY_URGENT_THRESHOLD;
+function EmailDetail({
+  record,
+  draftReply,
+  onDraftChange,
+  onSaved,
+  onApproveAndSend,
+  onReject,
+}: EmailDetailProps): JSX.Element {
+  const { name, email } = parseFrom(record.from);
+  const match = Math.round(minConfidence(record) * 100);
 
   return (
-    <li className="email-row">
-      <div className="row-priority" data-urgent={isUrgent}>
-        {priority}
-        <span className="row-priority-label">pri</span>
-      </div>
-      <div className="row-main">
-        <div className="row-top">
-          <div>
-            <h2 className="row-subject">{record.subject || "(no subject)"}</h2>
-            <div className="row-from">{record.from}</div>
-          </div>
-          <div className="row-received">
-            {formatReceived(record.receivedAt)}
+    <div className="detail-pane">
+      <div className="detail-header">
+        <div>
+          <h1 className="detail-subject">{record.subject || "(no subject)"}</h1>
+          <div className="detail-from">
+            {name} · {email}
           </div>
         </div>
+        <div className="detail-actions">
+          <button
+            type="button"
+            className="btn-outline"
+            onClick={() => onReject(record.messageId)}
+          >
+            Reject
+          </button>
+          <button
+            type="button"
+            className="btn-solid"
+            onClick={() => onApproveAndSend(record.messageId)}
+          >
+            Approve &amp; send
+          </button>
+        </div>
+      </div>
 
-        <p className="row-snippet">{record.snippet}</p>
+      <CorrectionBar record={record} onSaved={onSaved} />
 
-        <ConfidenceGauge record={record} />
-
-        <div className="row-tags">
-          <span className="chip" data-state={responseState}>
-            {responseState}
+      <div className="original-message">
+        <div className="original-message-header">
+          <span className="email-list-item-from">{initials(name)}</span>
+          <span>
+            {name} wrote · {formatReceived(record.receivedAt)}
           </span>
-          <span className="chip chip-outline">{contentTag}</span>
-          <span className="meta-note">{sourceLabel(source)}</span>
-          {record.isFixture ? (
-            <span className="meta-note">· fixture data</span>
-          ) : null}
-          {responseState === "To Respond" ? (
-            <span
-              className="draft-flag"
-              data-created={record.draftCreated}
-              title="AI-generated draft - not sent. Review and send from Gmail yourself."
-            >
-              {record.draftCreated
-                ? "Draft ready in Gmail — not sent"
-                : "No draft yet"}
-            </span>
-          ) : null}
         </div>
-
-        <CorrectionForm record={record} onSaved={onSaved} />
+        <p className="original-message-body">{record.bodyText}</p>
       </div>
-    </li>
+
+      <div className="draft-panel">
+        <div className="draft-panel-header">
+          <span className="draft-panel-title">Drafted reply</span>
+          <span className="draft-panel-note">
+            {sourceLabel(record.classification.source)}
+          </span>
+          <span
+            className="draft-panel-match"
+            data-level={confidenceLevel(match / 100)}
+          >
+            {match}%
+          </span>
+        </div>
+        <textarea
+          className="draft-textarea"
+          value={draftReply}
+          onChange={(e) => onDraftChange(record.messageId, e.target.value)}
+          rows={8}
+        />
+        <div className="draft-panel-tools">
+          <button
+            type="button"
+            className="btn-outline"
+            disabled
+            title="Not implemented yet"
+          >
+            Shorter
+          </button>
+          <button
+            type="button"
+            className="btn-outline"
+            disabled
+            title="Not implemented yet"
+          >
+            Warmer
+          </button>
+          <button
+            type="button"
+            className="btn-outline"
+            disabled
+            title="Not implemented yet"
+          >
+            More formal
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -277,21 +441,48 @@ export function ReviewQueue(): JSX.Element {
   const [state, setState] = useState<LoadState>("loading");
   const [emails, setEmails] = useState<EmailRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [userName, setUserName] = useState("Reviewer");
+
+  const [statusByEmail, setStatusByEmail] = useState<Map<string, QueueStatus>>(
+    new Map(),
+  );
+  const [draftByEmail, setDraftByEmail] = useState<Map<string, string>>(
+    new Map(),
+  );
+  const [activeQueue, setActiveQueue] = useState<QueueStatus>("needs-review");
+  const [listFilter, setListFilter] = useState<ListFilter>("all");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load(): Promise<void> {
       try {
-        const json = await authenticatedJsonRequest(apiUrlFor("emails"));
+        const [json, session] = await Promise.all([
+          authenticatedJsonRequest(apiUrlFor("emails")),
+          fetchAuthSession(),
+        ]);
         const parsed = EmailRecordSchema.array().parse(json);
-        // Sort once, lowest-confidence-first, at load time. A later correction
-        // updates the record in place (see handleSaved) without re-sorting, so
-        // a saved row doesn't jump position under the user's cursor.
         const initialSort = sortByConfidence(parsed);
 
         if (!cancelled) {
+          const idPayload = session.tokens?.idToken?.payload;
+          const name =
+            (typeof idPayload?.name === "string" && idPayload.name) ||
+            (typeof idPayload?.email === "string" && idPayload.email) ||
+            "Reviewer";
+
           setEmails(initialSort);
+          setDraftByEmail(
+            new Map(
+              initialSort.map((record) => [
+                record.messageId,
+                defaultDraftReply(record, name),
+              ]),
+            ),
+          );
+          setSelectedId(initialSort[0]?.messageId ?? null);
+          setUserName(name);
           setState("ready");
         }
       } catch (err) {
@@ -311,8 +502,47 @@ export function ReviewQueue(): JSX.Element {
     };
   }, []);
 
+  const queueEmails = useMemo(
+    () =>
+      emails.filter(
+        (e) =>
+          (statusByEmail.get(e.messageId) ?? "needs-review") === activeQueue,
+      ),
+    [emails, statusByEmail, activeQueue],
+  );
+
+  /** The queue's emails further narrowed by the confidence chip - this is
+   *  what's actually on screen, so it drives the list, next-selection after
+   *  an action, and the detail-pane fallback alike. */
+  const visibleEmails = useMemo(() => {
+    if (listFilter === "high-confidence") {
+      return queueEmails.filter(
+        (e) => confidenceLevel(minConfidence(e)) === "high",
+      );
+    }
+    if (listFilter === "needs-attention") {
+      return queueEmails.filter(
+        (e) => confidenceLevel(minConfidence(e)) !== "high",
+      );
+    }
+    return queueEmails;
+  }, [queueEmails, listFilter]);
+
+  const counts = useMemo(() => {
+    const result: Record<QueueStatus, number> = {
+      "needs-review": 0,
+      approved: 0,
+      sent: 0,
+      rejected: 0,
+    };
+    for (const record of emails) {
+      const status = statusByEmail.get(record.messageId) ?? "needs-review";
+      result[status] += 1;
+    }
+    return result;
+  }, [emails, statusByEmail]);
+
   function handleSaved(updated: EmailRecord): void {
-    // Update in place; don't re-sort so the row doesn't jump under the user's cursor.
     setEmails((current) =>
       current.map((email) =>
         email.messageId === updated.messageId ? updated : email,
@@ -320,35 +550,35 @@ export function ReviewQueue(): JSX.Element {
     );
   }
 
+  function handleDraftChange(messageId: string, text: string): void {
+    setDraftByEmail((current) => new Map(current).set(messageId, text));
+  }
+
+  /** Moves an email to a new queue and selects the next item so the detail
+   *  pane doesn't go blank right after the action that just emptied it. */
+  function moveToQueue(messageId: string, status: QueueStatus): void {
+    setStatusByEmail((current) => new Map(current).set(messageId, status));
+    setSelectedId((current) => {
+      if (current !== messageId) return current;
+      const remaining = visibleEmails.filter((e) => e.messageId !== messageId);
+      return remaining[0]?.messageId ?? null;
+    });
+  }
+
   async function handleSignOut(): Promise<void> {
-    // Auth status transition is handled by the Hub "auth" listener in
-    // App.tsx (Amplify dispatches a "signedOut" event here).
     await signOut();
   }
 
-  return (
-    <div className="queue-shell">
-      <div className="queue-header">
-        <div className="queue-heading">
-          <p className="login-eyebrow">Email Concierge</p>
-          <h1 className="queue-title">Review queue</h1>
-        </div>
-        <div className="queue-actions">
-          {state === "ready" ? (
-            <span className="queue-count">
-              {emails.length} to review, weakest confidence first
-            </span>
-          ) : null}
-          <button
-            type="button"
-            className="btn-ghost"
-            onClick={() => void handleSignOut()}
-          >
-            Sign out
-          </button>
-        </div>
-      </div>
+  const selectedRecord =
+    visibleEmails.find((e) => e.messageId === selectedId) ??
+    visibleEmails[0] ??
+    null;
 
+  const activeQueueLabel =
+    QUEUE_ORDER.find((q) => q.status === activeQueue)?.label ?? "";
+
+  return (
+    <div className="app-shell">
       {state === "loading" ? (
         <p className="queue-status">Loading emails…</p>
       ) : null}
@@ -357,19 +587,41 @@ export function ReviewQueue(): JSX.Element {
       ) : null}
 
       {state === "ready" ? (
-        emails.length === 0 ? (
-          <p className="queue-empty">Nothing to review right now.</p>
-        ) : (
-          <ul className="queue-list">
-            {emails.map((record) => (
-              <EmailRow
-                key={record.messageId}
-                record={record}
-                onSaved={handleSaved}
-              />
-            ))}
-          </ul>
-        )
+        <>
+          <Sidebar
+            userName={userName}
+            counts={counts}
+            activeQueue={activeQueue}
+            onSelectQueue={(queue) => {
+              setActiveQueue(queue);
+              setSelectedId(null);
+            }}
+            onSignOut={() => void handleSignOut()}
+          />
+          <EmailList
+            title={activeQueueLabel}
+            emails={visibleEmails}
+            selectedId={selectedRecord?.messageId ?? null}
+            onSelect={setSelectedId}
+            filter={listFilter}
+            onFilterChange={setListFilter}
+          />
+          {selectedRecord ? (
+            <EmailDetail
+              key={selectedRecord.messageId}
+              record={selectedRecord}
+              draftReply={draftByEmail.get(selectedRecord.messageId) ?? ""}
+              onDraftChange={handleDraftChange}
+              onSaved={handleSaved}
+              onApproveAndSend={(id) => moveToQueue(id, "sent")}
+              onReject={(id) => moveToQueue(id, "rejected")}
+            />
+          ) : (
+            <div className="detail-pane detail-empty">
+              Nothing to review right now.
+            </div>
+          )}
+        </>
       ) : null}
     </div>
   );

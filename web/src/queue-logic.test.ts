@@ -4,7 +4,9 @@ import {
   confidenceFields,
   confidenceLevel,
   formatReceived,
+  initials,
   minConfidence,
+  parseFrom,
   sortByConfidence,
   sourceLabel,
 } from "./queue-logic";
@@ -95,15 +97,66 @@ describe("sourceLabel", () => {
 });
 
 describe("formatReceived", () => {
-  it("formats a valid ISO timestamp", () => {
-    const formatted = formatReceived("2026-09-27T14:03:00.000Z");
-    expect(formatted).not.toBe("2026-09-27T14:03:00.000Z");
-    expect(typeof formatted).toBe("string");
+  // Noon UTC falls on the same calendar day in every zone from UTC-11 to
+  // UTC+11, so these fixtures are timezone-safe wherever the tests run.
+  const now = new Date("2026-09-27T12:00:00.000Z");
+
+  it("formats today's timestamp as a time of day", () => {
+    const formatted = formatReceived("2026-09-27T12:00:00.000Z", now);
+    expect(formatted).not.toBe("2026-09-27T12:00:00.000Z");
     expect(formatted.length).toBeGreaterThan(0);
   });
 
+  it("formats yesterday as 'Yest'", () => {
+    expect(formatReceived("2026-09-26T12:00:00.000Z", now)).toBe("Yest");
+  });
+
+  it("formats within the last week as a weekday name", () => {
+    const formatted = formatReceived("2026-09-23T12:00:00.000Z", now);
+    expect(formatted).not.toBe("Yest");
+    expect(formatted.length).toBeGreaterThan(0);
+  });
+
+  it("formats older dates as a short date", () => {
+    const formatted = formatReceived("2026-01-01T12:00:00.000Z", now);
+    expect(formatted).toContain("Jan");
+  });
+
   it("falls back to the raw string for an unparseable timestamp", () => {
-    expect(formatReceived("not-a-date")).toBe("not-a-date");
+    expect(formatReceived("not-a-date", now)).toBe("not-a-date");
+  });
+});
+
+describe("parseFrom", () => {
+  it("splits 'Name <addr>' form", () => {
+    expect(parseFrom("Priya Raman <priya@northwind.co>")).toEqual({
+      name: "Priya Raman",
+      email: "priya@northwind.co",
+    });
+  });
+
+  it("strips quotes around the display name", () => {
+    expect(parseFrom('"Priya Raman" <priya@northwind.co>')).toEqual({
+      name: "Priya Raman",
+      email: "priya@northwind.co",
+    });
+  });
+
+  it("treats a bare address as both name and email", () => {
+    expect(parseFrom("sarah.chen@example.com")).toEqual({
+      name: "sarah.chen@example.com",
+      email: "sarah.chen@example.com",
+    });
+  });
+});
+
+describe("initials", () => {
+  it("takes the first letter of the first two words", () => {
+    expect(initials("Priya Raman")).toBe("PR");
+  });
+
+  it("takes the first two letters of a single word", () => {
+    expect(initials("sarah.chen@example.com")).toBe("SA");
   });
 });
 

@@ -21,7 +21,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root {
     --paper: #1c1a17;
     --paper-raised: #232019;
     --ink: #ece7dc;
@@ -36,22 +36,6 @@
     --gold-soft: #362c19;
     --focus: #6ea3ff;
   }
-}
-
-:root[data-theme="dark"] {
-  --paper: #1c1a17;
-  --paper-raised: #232019;
-  --ink: #ece7dc;
-  --ink-soft: #a89f8f;
-  --rule: #3a352c;
-  --rule-strong: #4c453a;
-  --accent: #7fa38d;
-  --accent-soft: #24302a;
-  --flag: #e08064;
-  --flag-soft: #3a241d;
-  --gold: #d4ac5c;
-  --gold-soft: #362c19;
-  --focus: #6ea3ff;
 }
 
 * {
@@ -128,11 +112,9 @@ button {
   display: grid;
   place-items: center;
   padding: 1.5rem;
-  background: radial-gradient(
-      circle at 15% 20%,
-      var(--accent-soft),
-      transparent 55%
-    ), var(--paper);
+  background:
+    radial-gradient(circle at 15% 20%, var(--accent-soft), transparent 55%),
+    var(--paper);
 }
 
 .login-card {
@@ -331,7 +313,9 @@ button {
   font-size: 0.82rem;
   font-weight: 600;
   white-space: nowrap;
-  transition: border-color 120ms ease, color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
 }
 
 .btn-ghost:hover {

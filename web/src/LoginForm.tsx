@@ -2,14 +2,10 @@ import { signIn, signInWithRedirect } from "aws-amplify/auth";
 import { type FormEvent, useState } from "react";
 
 interface LoginFormProps {
-  onSignedIn: () => void;
   redirectError: string | null;
 }
 
-export function LoginForm({
-  onSignedIn,
-  redirectError,
-}: LoginFormProps): JSX.Element {
+export function LoginForm({ redirectError }: LoginFormProps): JSX.Element {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +41,9 @@ export function LoginForm({
       });
 
       if (isSignedIn) {
-        onSignedIn();
+        // Auth status transition is handled by the Hub "auth" listener in
+        // App.tsx (Amplify dispatches a "signedIn" event here), so nothing
+        // to do locally beyond letting the submit finish.
         return;
       }
 

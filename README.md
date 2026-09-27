@@ -9,7 +9,9 @@ This is a demo built to show AWS solutions-architecture judgment — service cho
 and cost — not a production tool. Every non-obvious decision below has a reason attached.
 
 **Live**: `https://mvp.d2sqaqo48s97lx.amplifyapp.com` (Cognito login required — see
-[Finishing setup](#finishing-setup-the-one-step-only-you-can-do) for credentials).
+[Credentials recap](#credentials-recap)). Live Gmail polling and draft generation are connected
+and running — see [Finishing setup](#finishing-setup-the-one-step-only-you-can-do) for how, and
+for the runbook if the refresh token ever needs to be re-issued.
 
 ## Architecture
 
@@ -166,9 +168,19 @@ so the review queue isn't empty — no live Gmail connection required for this s
 
 ## Finishing setup (the one step only you can do)
 
-Everything in this repo is built, deployed, and verified except live Gmail access — that
-requires creating OAuth credentials under your own Google account, which no agent can do on
-your behalf. Once you have them, the whole pipeline goes live within one poll cycle (2 minutes).
+**Status: done.** Live Gmail access requires OAuth credentials granted under your own Google
+account — the one step no agent can complete unattended, since it ends in you clicking "Allow"
+on Google's consent screen. That grant happened during this build (via an OAuth Client ID
+already provisioned in a personal GCP project, reused rather than creating a new one) and the
+resulting refresh token is stored in Secrets Manager. `poll-lambda` is backfilling and
+classifying real inbox mail, and `draft-lambda` has created its first real Gmail drafts for
+"To Respond" messages — confirmed via CloudWatch logs and a DynamoDB scan showing non-fixture
+records with `source: "jev"` and `draftCreated: true`.
+
+The steps below are the runbook for re-doing this from scratch — e.g. on a fresh clone, a
+different Google account, or if the refresh token is ever revoked (Google can invalidate a
+refresh token after ~6 months of inactivity, or immediately if the OAuth consent screen's
+publishing status is "Testing" rather than "In production").
 
 1. **Google Cloud Console** (console.cloud.google.com), in a project of your choice:
    - **APIs & Services → Library**: enable the **Gmail API**.
@@ -177,7 +189,9 @@ your behalf. Once you have them, the whole pipeline goes live within one poll cy
      **In production** (staying unverified is fine — this app is used only by you — but
      "Testing" status expires refresh tokens every 7 days, which "In production" avoids).
    - **APIs & Services → Credentials → Create Credentials → OAuth Client ID**, application type
-     **Desktop app**. Note the Client ID and Client Secret.
+     **Desktop app**. Note the Client ID and Client Secret. (Any existing "Desktop app" OAuth
+     client already authorized for the Gmail API under your account works too — a new one
+     isn't required just for this app.)
 
 2. **Run the bootstrap script locally** (not on AWS — this needs your browser for the consent
    screen):

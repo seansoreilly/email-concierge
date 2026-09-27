@@ -6,8 +6,10 @@ solutions-architecture judgment, using the working UI as proof-of-life, not as
 the main event.
 
 **Runtime:** ~120s. **Format:** Remotion composition, 1920x1080, 30fps.
-**Narration:** ElevenLabs TTS, "Jess" voice, one continuous VO track, captions
-burned in and synced to VO timing.
+**Narration:** ElevenLabs TTS, "Jess" voice, one continuous VO track.
+**Captions:** per-beat title/subtitle cards (the decision + its one-line why),
+not a scrolling word-for-word transcript — see Scene 2's caption spec and the
+Remotion notes below for exactly what's on screen.
 
 **Structure:** 20s cold-open UI proof → 100s architecture-decision reel (6 beats,
 ~16–17s each) over one persistent, animated system diagram.
@@ -16,32 +18,41 @@ burned in and synced to VO timing.
 
 ## Asset inventory
 
+The live app's list API (`services/api-lambda/src/index.ts`) does an
+unfiltered `ScanCommand` over the whole `emails` table — there is no
+fixture-only view, so a screenshot of the real deployed app always risks
+showing real inbox rows mixed in with fixtures, no matter which email is
+selected in the detail pane. (An earlier pass at these assets learned this
+the hard way — the queue *list* itself carried real recruiter threads even
+though the *selected* detail was a fixture.) The fix used here: a small
+static-HTML mockup (`assets/mockup/`) that reproduces the app's exact markup
+and CSS (`web/src/styles.css`, `web/src/ReviewQueue.tsx`'s structure) and
+renders it against nothing but the 13 fixtures in
+`shared/fixtures/emails.ts`, served locally and screenshotted — no live app,
+no Cognito session, no DynamoDB, no real data anywhere in the pipeline.
+
 - `assets/final/review-queue-detail.jpg` — three-panel review queue: queue list
   (left), email thread (center), drafted-reply panel with `To Respond / Work /
   P8` classification dropdowns and a 55% confidence badge (right), fixture
-  `sarah.chen@example.com`. Captured live against the deployed Amplify app,
-  logged in via the real Cognito session, using synthetic fixture data
-  (`pnpm seed`) — all 13 fixtures use fictional senders, no real inbox content
-  anywhere. One real element still had to be redacted: the drafted-reply
-  panel's sign-off is generated client-side from the *logged-in Cognito
-  user's* identity (`web/src/ReviewQueue.tsx`, `defaultDraftReply()`), not
-  from the database — it shows the real account regardless of which fixture
-  is selected. That line, and the reviewer-avatar corner (bottom-left), are
-  redacted (black bars) in both shots.
+  `sarah.chen@example.com`. Reviewer identity is a generic placeholder
+  (`reviewer@example.com` / "J. Reviewer") rather than a real account, since
+  the real app's drafted-reply sign-off is generated client-side from
+  whoever is logged in (`web/src/ReviewQueue.tsx`, `defaultDraftReply()`) —
+  the mockup sidesteps that entirely rather than redacting it after the fact.
 - `assets/final/review-queue-awaitingreply.jpg` — same layout, different
   fixture (`you@example.com`), classified `Awaiting Reply / Work / P5` — good
   second shot to show a different taxonomy value.
-- `assets/raw/` — unredacted originals, kept for reference only. **Never use
-  these directly in the video** — they contain the real sign-off email and
-  reviewer account name. Always render from `assets/final/`.
+- `assets/mockup/` — `build-data.mjs` (reconstructs the seeded fixture
+  records) and `render.mjs` (emits the two static HTML pages) — rerun with
+  `node render.mjs` and reload in a browser to recapture or add shots.
 - Diagram: build fresh in Remotion (SVG/HTML, not a screenshot) mirroring the
   README's ASCII architecture diagram — see Scene 2 spec below.
 
-No further live capture is needed. If more screenshots are wanted later (e.g.
-the correction flow, "Approved"/"Sent" queues), reseed fixtures with `pnpm
-seed` and recapture the same way — never screenshot the live queue without
-seeding fixtures first, since real inbox threads are mixed into the same
-DynamoDB table and are easy to click into by accident.
+No further capture is needed for this cut. If more screenshots are wanted
+later (e.g. the correction flow, "Approved"/"Sent" queues), extend
+`render.mjs` rather than going back to the live app — the live queue mixes
+real inbox threads into the same list with no way to filter them out from
+the UI side.
 
 ---
 
@@ -49,19 +60,24 @@ DynamoDB table and are easy to click into by accident.
 
 ### Scene 1 — Cold open (0:00–0:20)
 
-**Visual:** Full-bleed `review-queue-detail.jpg`, slow Ken Burns push-in
-starting wide (full three-panel view) and settling on the drafted-reply panel
-with its confidence badge. Cut to `review-queue-awaitingreply.jpg` at ~0:14 (quick
-0.6s crossfade) to show a second, differently-classified email — signals
-"this handles variety," not one canned example.
+**Visual:** `review-queue-detail.jpg` and `-awaitingreply.jpg` are 1350×896
+captures; the app's content sits in roughly the top half of that frame with
+blank page background below — crop to the actual content bounds before
+compositing (check exact pixel bounds against the files, don't assume) rather
+than stretching the blank space to fill 1080p. Ken Burns push-in starting
+wide (full three-panel view) and settling on the drafted-reply panel with its
+confidence badge, then cut to `review-queue-awaitingreply.jpg` at ~0:14 (same
+crop, quick 0.6s crossfade) to show a second, differently-classified email —
+signals "this handles variety," not one canned example.
 
 **Caption/lower-third (appears ~0:03):** `email-concierge — Gmail triage MVP`
 
 **VO script (~20s at natural pace):**
 > "This is email-concierge — it polls Gmail, classifies every new message,
-> labels it, and drafts a reply for anything that needs one. Nothing sends
-> without a human approving it. What I want to walk you through isn't the UI —
-> it's the AWS decisions underneath it."
+> labels it, and drafts a reply for anything that needs one. It creates that
+> draft in Gmail; it never sends — sending stays a separate, manual step in
+> Gmail itself. What I want to walk you through isn't the UI — it's the AWS
+> decisions underneath it."
 
 **Transition:** Hard cut / wipe into Scene 2's diagram, timed to land exactly
 as VO says "AWS decisions underneath it."
@@ -73,7 +89,7 @@ of the video):**
 
 ```
 EventBridge Scheduler ──▶ poll-lambda ──▶ Gmail API
-                              │
+                              │  (heuristic filter first)
                               ▼
                         Jev ──▶ Haiku (fallback)
                               │
@@ -86,7 +102,10 @@ EventBridge Scheduler ──▶ poll-lambda ──▶ Gmail API
 Cognito ◀── Amplify Hosting (SPA)
     │
     ▼
-API Gateway (HTTP API) ──▶ api-lambda ──▶ DynamoDB
+API Gateway (HTTP API) ──▶ api-lambda ──▶ DynamoDB (scan + corrections)
+                                                │
+                                                ▼ (non-fixture corrections only)
+                                          Gmail batchModify (sync label back)
 ```
 
 Render as clean boxes/arrows (AWS-service-shaped icons optional but not
@@ -109,12 +128,11 @@ timed to appear as VO states it and clear before the next beat's VO starts.
 `Bursty workload, zero idle cost`
 
 *VO:*
-> "It polls every two minutes and does a burst of work — no long-lived
-> process, no persistent connection. That's a Lambda shape, not a Fargate
-> shape — Fargate would sit idle between polls and bill for it. EventBridge
-> Scheduler, not the older CloudWatch Events rule, because it's AWS's current
-> direction, and it gives each schedule its own IAM execution role instead of
-> sharing one event bus."
+> "It polls every two minutes, in short bursts — no persistent connection to
+> hold open. Lambda's per-invocation billing fits that better than a Fargate
+> task sitting ready between polls. EventBridge Scheduler, not the older
+> CloudWatch Events rule, gives each schedule its own IAM execution role
+> instead of a permission on a shared event bus."
 
 **Beat 2 — DynamoDB, not RDS (0:40–0:56, ~16s)**
 
@@ -122,27 +140,28 @@ timed to appear as VO states it and clear before the next beat's VO starts.
 `draft-lambda`.
 
 *Caption:* `DynamoDB — not RDS`
-`No joins, known-key access, Streams decouples drafting`
+`Mostly known-key access, Streams decouples drafting`
 
 *VO:*
-> "The data model is one item per email, looked up by message ID — no
-> relational joins. DynamoDB's on-demand pricing is near-zero at this volume,
-> and its Streams feature is what lets draft generation happen
-> asynchronously — an insert triggers draft-lambda directly, so the poll loop
-> never waits on Anthropic's API."
+> "The data model is one item per email, mostly looked up by message ID —
+> the review-queue API's one table scan aside, there's no relational join
+> anywhere. DynamoDB's on-demand pricing is near-zero at this volume, and its
+> Streams feature is what decouples reply drafting from polling — an insert
+> triggers draft-lambda directly, instead of the poll loop generating the
+> reply itself."
 
 **Beat 3 — HTTP API, not REST API (0:56–1:10, ~14s)**
 
 *Highlight:* `API Gateway (HTTP API)` box and the `Cognito` link into it.
 
 *Caption:* `HTTP API — not REST API`
-`~1/5th the cost, native JWT auth against Cognito`
+`Cheaper per request, native JWT auth against Cognito`
 
 *VO:*
 > "The review-queue API sits behind API Gateway's HTTP API, not REST API —
-> about a fifth of the per-request cost, and it validates Cognito JWTs
-> natively. REST API's extra features — request transformation, usage plans —
-> have no use case here."
+> it's meaningfully cheaper per request, and it validates Cognito JWTs
+> natively with no separate Lambda authorizer. REST API's extra features —
+> request transformation, usage plans — have no use case here."
 
 **Beat 4 — Polling, not Pub/Sub push (1:10–1:24, ~14s)**
 
@@ -152,23 +171,26 @@ timed to appear as VO states it and clear before the next beat's VO starts.
 `Push expires every 7 days; polling needs no extra infra`
 
 *VO:*
-> "Gmail does offer push notifications, but they expire weekly and need a
-> public endpoint or a Pub/Sub subscriber to renew. A two-minute poll costs a
-> trivial slice of the API quota and needs nothing extra to run."
+> "Gmail does offer push notifications, but the underlying watch subscription
+> expires every seven days and has to be renewed, and delivery needs either a
+> public HTTPS endpoint or a Pub/Sub subscriber. A two-minute poll costs a
+> trivial slice of the daily API quota and needs no extra infrastructure to
+> run."
 
-**Beat 5 — Jev primary, Haiku fallback (1:24–1:40, ~16s)**
+**Beat 5 — Heuristic first, then Jev, then Haiku (1:24–1:40, ~16s)**
 
-*Highlight:* `Jev ──▶ Haiku (fallback)` box pair.
+*Highlight:* `Jev ──▶ Haiku (fallback)` box pair (a small heuristic-filter tag
+on `poll-lambda` itself, ahead of both).
 
-*Caption:* `Jev primary, Claude Haiku fallback`
-`Typed decision model first — ~12x cheaper, ~10x faster`
+*Caption:* `Heuristic filter → Jev → Haiku fallback`
+`Cheapest check first; the LLM is the last resort, not the first`
 
 *VO:*
-> "Classification isn't one LLM call — it's a typed decision model, Jev,
-> answering three questions in a single batched call, falling back to Claude
-> Haiku only if Jev errors or times out. Haiku's also the only model that
-> generates the draft text — Jev is deliberately non-generative, so it
-> structurally can't do that job."
+> "Classification is a cascade, not one LLM call. A cheap heuristic filter
+> runs first, no API call needed. What's left goes to Jev, a typed decision
+> model answering all three classification questions in one batched call,
+> falling back to Claude Haiku only on error or timeout. Haiku alone
+> generates the draft text — Jev is deliberately non-generative."
 
 **Beat 6 — "No send, ever" (1:40–1:58, ~18s, closing beat)**
 
@@ -182,15 +204,14 @@ icon overlay on `poll-lambda`/`draft-lambda`.
 > "Gmail's API has no scope that allows drafting and labeling but blocks
 > sending — `gmail.modify` technically permits both. So the boundary is
 > enforced in code: one module is the only place allowed to import the Gmail
-> client, it exposes a fixed allowlist of nine methods with `send` absent
-> from it, and two CI tests police that boundary by static analysis on every
-> push."
+> client, with a fixed allowlist of methods that leaves `send` out
+> completely, policed by tests on every push."
 
 ### Scene 3 — Button (1:58–2:00)
 
 **Visual:** Diagram fades to 30% opacity; centered title card fades up.
 
-**Caption:** `email-concierge — Terraform, 3 Lambdas, ~$1–2/month`
+**Caption:** `email-concierge — Terraform, 3 Lambdas, est. ~$1–2/month`
 
 **VO:** *(none — let the last beat's line land, 2s of silence/breath before
 cut)*
@@ -223,56 +244,64 @@ cut)*
 
 | # | Start | End | Beat | VO word count (~) |
 |---|-------|-----|------|---|
-| 0 | 0:00 | 0:20 | Cold open | ~45 words |
-| 1 | 0:20 | 0:40 | Lambda vs Fargate | ~55 words |
-| 2 | 0:40 | 0:56 | DynamoDB vs RDS | ~50 words |
+| 0 | 0:00 | 0:20 | Cold open | ~62 words |
+| — | 0:20 | 0:24 | Diagram draws in (no VO) | 0 words |
+| 1 | 0:24 | 0:40 | Lambda vs Fargate | ~48 words |
+| 2 | 0:40 | 0:56 | DynamoDB vs RDS | ~55 words |
 | 3 | 0:56 | 1:10 | HTTP API vs REST | ~40 words |
-| 4 | 1:10 | 1:24 | Polling vs push | ~42 words |
-| 5 | 1:24 | 1:40 | Jev + Haiku cascade | ~55 words |
-| 6 | 1:40 | 1:58 | No send, ever | ~60 words |
+| 4 | 1:10 | 1:24 | Polling vs push | ~48 words |
+| 5 | 1:24 | 1:40 | Heuristic → Jev → Haiku cascade | ~52 words |
+| 6 | 1:40 | 1:58 | No send, ever | ~52 words |
 | 7 | 1:58 | 2:00 | Button | 0 words |
+
+All beats now sit in the ~170–195 wpm range, comfortable for natural
+narration — still worth timing against the actual ElevenLabs recording and
+adjusting frame ranges to the real audio rather than these estimates.
 
 Full VO script concatenated (feed to ElevenLabs as one generation for
 consistent pacing/prosody, then split by silence for per-beat frame timing):
 
 > This is email-concierge — it polls Gmail, classifies every new message,
-> labels it, and drafts a reply for anything that needs one. Nothing sends
-> without a human approving it. What I want to walk you through isn't the
-> UI — it's the AWS decisions underneath it.
+> labels it, and drafts a reply for anything that needs one. It creates that
+> draft in Gmail; it never sends — sending stays a separate, manual step in
+> Gmail itself. What I want to walk you through isn't the UI — it's the AWS
+> decisions underneath it.
 >
-> It polls every two minutes and does a burst of work — no long-lived
-> process, no persistent connection. That's a Lambda shape, not a Fargate
-> shape — Fargate would sit idle between polls and bill for it. EventBridge
-> Scheduler, not the older CloudWatch Events rule, because it's AWS's current
-> direction, and it gives each schedule its own IAM execution role instead of
-> sharing one event bus.
+> It polls every two minutes, in short bursts — no persistent connection to
+> hold open. Lambda's per-invocation billing fits that better than a Fargate
+> task sitting ready between polls. EventBridge Scheduler, not the older
+> CloudWatch Events rule, gives each schedule its own IAM execution role
+> instead of a permission on a shared event bus.
 >
-> The data model is one item per email, looked up by message ID — no
-> relational joins. DynamoDB's on-demand pricing is near-zero at this volume,
-> and its Streams feature is what lets draft generation happen
-> asynchronously — an insert triggers draft-lambda directly, so the poll loop
-> never waits on Anthropic's API.
+> The data model is one item per email, mostly looked up by message ID — the
+> review-queue API's one table scan aside, there's no relational join
+> anywhere. DynamoDB's on-demand pricing is near-zero at this volume, and its
+> Streams feature is what decouples reply drafting from polling — an insert
+> triggers draft-lambda directly, instead of the poll loop generating the
+> reply itself.
 >
 > The review-queue API sits behind API Gateway's HTTP API, not REST API —
-> about a fifth of the per-request cost, and it validates Cognito JWTs
-> natively. REST API's extra features — request transformation, usage
-> plans — have no use case here.
+> it's meaningfully cheaper per request, and it validates Cognito JWTs
+> natively with no separate Lambda authorizer. REST API's extra features —
+> request transformation, usage plans — have no use case here.
 >
-> Gmail does offer push notifications, but they expire weekly and need a
-> public endpoint or a Pub/Sub subscriber to renew. A two-minute poll costs a
-> trivial slice of the API quota and needs nothing extra to run.
+> Gmail does offer push notifications, but the underlying watch subscription
+> expires every seven days and has to be renewed, and delivery needs either a
+> public HTTPS endpoint or a Pub/Sub subscriber. A two-minute poll costs a
+> trivial slice of the daily API quota and needs no extra infrastructure to
+> run.
 >
-> Classification isn't one LLM call — it's a typed decision model, Jev,
-> answering three questions in a single batched call, falling back to Claude
-> Haiku only if Jev errors or times out. Haiku's also the only model that
-> generates the draft text — Jev is deliberately non-generative, so it
-> structurally can't do that job.
+> Classification is a cascade, not one LLM call. A cheap heuristic filter
+> runs first, no API call needed. What's left goes to Jev, a typed decision
+> model answering all three classification questions in one batched call,
+> falling back to Claude Haiku only on error or timeout. Haiku alone
+> generates the draft text — Jev is deliberately non-generative.
 >
 > Gmail's API has no scope that allows drafting and labeling but blocks
 > sending — gmail dot modify technically permits both. So the boundary is
 > enforced in code: one module is the only place allowed to import the Gmail
-> client, it exposes a fixed allowlist of nine methods with send absent from
-> it, and two CI tests police that boundary by static analysis on every push.
+> client, with a fixed allowlist of methods that leaves send out completely,
+> policed by tests on every push.
 
 ---
 

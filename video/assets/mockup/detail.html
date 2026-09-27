@@ -1,0 +1,1118 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>:root {
+  --paper: #f6f3ec;
+  --paper-raised: #fbf9f4;
+  --ink: #262220;
+  --ink-soft: #5c554d;
+  --rule: #dad3c4;
+  --rule-strong: #c2b8a3;
+  --accent: #3d5a4c;
+  --accent-soft: #e4ebe6;
+  --flag: #b5482e;
+  --flag-soft: #f6e5df;
+  --gold: #a9822f;
+  --gold-soft: #f2e9d4;
+  --focus: #1c66d4;
+
+  --font-display: "Fraunces", "Iowan Old Style", "Palatino Linotype", serif;
+  --font-body: "Inter", -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #1c1a17;
+    --paper-raised: #232019;
+    --ink: #ece7dc;
+    --ink-soft: #a89f8f;
+    --rule: #3a352c;
+    --rule-strong: #4c453a;
+    --accent: #7fa38d;
+    --accent-soft: #24302a;
+    --flag: #e08064;
+    --flag-soft: #3a241d;
+    --gold: #d4ac5c;
+    --gold-soft: #362c19;
+    --focus: #6ea3ff;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Shared chrome                                                          */
+/* ---------------------------------------------------------------------- */
+
+.app-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+}
+
+.mark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.mark-glyph {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.1em;
+  color: var(--accent);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Login                                                                  */
+/* ---------------------------------------------------------------------- */
+
+.login-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: radial-gradient(
+      circle at 15% 20%,
+      var(--accent-soft),
+      transparent 55%
+    ), var(--paper);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 2.5rem 2.25rem 2.25rem;
+  position: relative;
+}
+
+.login-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--accent);
+}
+
+.login-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 0 0 0.4rem;
+}
+
+.login-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.7rem;
+  line-height: 1.15;
+  margin: 0 0 1.75rem;
+  color: var(--ink);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1.1rem;
+}
+
+.field-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+}
+
+.field input {
+  border: 1px solid var(--rule-strong);
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 2px;
+  padding: 0.65rem 0.7rem;
+  font-size: 0.95rem;
+}
+
+.field input:focus-visible {
+  border-color: var(--accent);
+}
+
+.btn-primary {
+  width: 100%;
+  background: var(--ink);
+  color: var(--paper);
+  border: none;
+  border-radius: 2px;
+  padding: 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-top: 0.5rem;
+  transition: background-color 120ms ease;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.form-error {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--flag);
+  background: var(--flag-soft);
+  border-left: 2px solid var(--flag);
+  padding: 0.55rem 0.7rem;
+  margin: -0.25rem 0 1rem;
+  line-height: 1.4;
+}
+
+.btn-google {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  padding: 0.7rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: border-color 120ms ease;
+}
+
+.btn-google:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.btn-google:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--rule-strong);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Review queue shell - three-panel layout: sidebar, list, detail          */
+/* ---------------------------------------------------------------------- */
+
+:root {
+  --qa-bg: #ffffff;
+  --qa-panel: #fafafa;
+  --qa-border: #e5e5e5;
+  --qa-text: #18181b;
+  --qa-text-soft: #71717a;
+  --qa-text-faint: #a1a1aa;
+  --qa-active: #18181b;
+  --qa-active-text: #ffffff;
+  --qa-blue: #2563eb;
+  --qa-red: #dc2626;
+  --qa-red-soft: #fef2f2;
+  --qa-green: #16a34a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --qa-bg: #18181b;
+    --qa-panel: #1f1f23;
+    --qa-border: #303035;
+    --qa-text: #f4f4f5;
+    --qa-text-soft: #a1a1aa;
+    --qa-text-faint: #71717a;
+    --qa-active: #f4f4f5;
+    --qa-active-text: #18181b;
+    --qa-blue: #60a5fa;
+    --qa-red: #f87171;
+    --qa-red-soft: #3f1d1d;
+    --qa-green: #4ade80;
+  }
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 220px 340px 1fr;
+  height: 100vh;
+  background: var(--qa-bg);
+  color: var(--qa-text);
+  font-family: var(--font-body);
+}
+
+.queue-status {
+  padding: 2rem;
+  font-size: 0.9rem;
+  color: var(--qa-text-soft);
+}
+
+.queue-status.is-error {
+  color: var(--qa-red);
+}
+
+/* Sidebar */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--qa-border);
+  padding: 1.25rem 1rem;
+  background: var(--qa-panel);
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 1.5rem;
+}
+
+.sidebar-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 6px;
+  background: var(--qa-active);
+  color: var(--qa-active-text);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.sidebar-section-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--qa-text-faint);
+  margin: 0 0 0.5rem 0.5rem;
+}
+
+.sidebar-queues {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+}
+
+.sidebar-queue-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.85rem;
+  color: var(--qa-text-soft);
+  text-align: left;
+}
+
+.sidebar-queue-btn:hover {
+  background: var(--qa-border);
+}
+
+.sidebar-queue-btn[data-active="true"] {
+  background: var(--qa-active);
+  color: var(--qa-active-text);
+  font-weight: 600;
+}
+
+.sidebar-queue-count {
+  font-size: 0.78rem;
+  opacity: 0.7;
+}
+
+.sidebar-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--qa-border);
+}
+
+.sidebar-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 50%;
+  background: var(--qa-border);
+  color: var(--qa-text);
+  font-size: 0.72rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.sidebar-user {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.sidebar-user-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-user-role {
+  font-size: 0.72rem;
+  color: var(--qa-text-faint);
+}
+
+/* Email list pane */
+
+.email-list-pane {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--qa-border);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.email-list-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 1.1rem 1.1rem 0.75rem;
+}
+
+.email-list-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.email-list-count {
+  font-size: 0.78rem;
+  color: var(--qa-text-faint);
+}
+
+.filter-chips {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0 1.1rem 0.9rem;
+}
+
+.filter-chip {
+  border: 1px solid var(--qa-border);
+  background: transparent;
+  color: var(--qa-text-soft);
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.filter-chip[data-active="true"] {
+  background: var(--qa-active);
+  color: var(--qa-active-text);
+  border-color: var(--qa-active);
+}
+
+.email-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.email-list-empty {
+  padding: 2rem 1.1rem;
+  color: var(--qa-text-faint);
+  font-size: 0.85rem;
+}
+
+.email-list-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--qa-border);
+  border-left: 3px solid transparent;
+  padding: 0.85rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.email-list-item:hover {
+  background: var(--qa-panel);
+}
+
+.email-list-item[data-active="true"] {
+  background: var(--qa-panel);
+  border-left-color: var(--qa-blue);
+}
+
+.email-list-item-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.email-list-item-from {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.email-list-item-time {
+  font-size: 0.72rem;
+  color: var(--qa-text-faint);
+  white-space: nowrap;
+}
+
+.email-list-item-subject {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--qa-blue);
+}
+
+.email-list-item-snippet {
+  font-size: 0.8rem;
+  color: var(--qa-text-soft);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.email-list-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.15rem;
+}
+
+.tag-chip {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--qa-text-soft);
+  background: var(--qa-border);
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+}
+
+.match-chip {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--qa-blue);
+}
+
+.match-chip[data-level="mid"] {
+  color: var(--qa-red);
+}
+
+.match-chip[data-level="low"] {
+  color: var(--qa-red);
+}
+
+/* Detail pane */
+
+.detail-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  padding: 1.5rem 1.75rem 2rem;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.detail-empty {
+  align-items: center;
+  justify-content: center;
+  color: var(--qa-text-faint);
+  font-size: 0.9rem;
+}
+
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.detail-subject {
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin: 0 0 0.3rem;
+}
+
+.detail-from {
+  font-size: 0.85rem;
+  color: var(--qa-text-soft);
+}
+
+.detail-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+.btn-outline {
+  background: transparent;
+  border: 1px solid var(--qa-border);
+  color: var(--qa-text);
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.btn-outline:hover:not(:disabled) {
+  border-color: var(--qa-text-soft);
+}
+
+.btn-outline:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn-solid {
+  background: var(--qa-active);
+  color: var(--qa-active-text);
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1.1rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.btn-solid:hover {
+  opacity: 0.88;
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--qa-border);
+  color: var(--qa-text-soft);
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.btn-ghost:hover {
+  border-color: var(--qa-text-soft);
+  color: var(--qa-text);
+}
+
+.correction-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  background: var(--qa-panel);
+  border: 1px solid var(--qa-border);
+  border-radius: 8px;
+}
+
+.correction-bar select {
+  border: 1px solid var(--qa-border);
+  background: var(--qa-bg);
+  color: var(--qa-text);
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.correction-error {
+  font-size: 0.78rem;
+  color: var(--qa-red);
+}
+
+.original-message {
+  border: 1px solid var(--qa-border);
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+}
+
+.original-message-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+  color: var(--qa-text-soft);
+  margin-bottom: 0.75rem;
+}
+
+.original-message-header .email-list-item-from {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 50%;
+  background: var(--qa-border);
+  color: var(--qa-text);
+  font-size: 0.7rem;
+}
+
+.original-message-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.draft-panel {
+  border: 1px solid var(--qa-border);
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+  background: var(--qa-panel);
+}
+
+.draft-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.draft-panel-title {
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.draft-panel-note {
+  font-size: 0.76rem;
+  color: var(--qa-text-faint);
+  flex: 1;
+}
+
+.draft-panel-match {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--qa-blue);
+}
+
+.draft-panel-match[data-level="mid"],
+.draft-panel-match[data-level="low"] {
+  color: var(--qa-red);
+}
+
+.draft-textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--qa-border);
+  background: var(--qa-bg);
+  color: var(--qa-text);
+  border-radius: 6px;
+  padding: 0.75rem;
+  font-family: inherit;
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.draft-panel-tools {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Responsive                                                             */
+/* ---------------------------------------------------------------------- */
+
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto 1fr;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .sidebar {
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--qa-border);
+  }
+
+  .sidebar-queues {
+    flex-direction: row;
+  }
+
+  .sidebar-footer {
+    border-top: none;
+  }
+
+  .email-list-pane {
+    border-right: none;
+    border-bottom: 1px solid var(--qa-border);
+    max-height: 45vh;
+  }
+
+  .detail-header {
+    flex-direction: column;
+  }
+}
+
+/* mockup-only: hide dark-mode media query so captures are deterministic regardless of the renderer's OS theme */
+</style>
+</head>
+<body>
+<div class="app-shell" style="height:900px">
+  <div class="sidebar">
+    <div class="sidebar-brand"><span class="sidebar-mark">E</span> Concierge</div>
+    <div class="sidebar-section-label">Queues</div>
+    <ul class="sidebar-queues">
+      <li><button type="button" class="sidebar-queue-btn" data-active="true">Needs review <span class="sidebar-queue-count">13</span></button></li>
+      <li><button type="button" class="sidebar-queue-btn">Approved <span class="sidebar-queue-count">0</span></button></li>
+      <li><button type="button" class="sidebar-queue-btn">Sent <span class="sidebar-queue-count">0</span></button></li>
+      <li><button type="button" class="sidebar-queue-btn">Rejected <span class="sidebar-queue-count">0</span></button></li>
+    </ul>
+    <div class="sidebar-footer">
+      <span class="sidebar-avatar">RV</span>
+      <div class="sidebar-user"><span class="sidebar-user-name">reviewer@example.com</span><span class="sidebar-user-role">Reviewer</span></div>
+      <button type="button" class="btn-ghost">Sign out</button>
+    </div>
+  </div>
+  <div class="email-list-pane">
+    <div class="email-list-header">
+      <h1 class="email-list-title">Needs review</h1>
+      <span class="email-list-count">13 emails</span>
+    </div>
+    <div class="filter-chips">
+      <button type="button" class="filter-chip" data-active="true">All</button>
+      <button type="button" class="filter-chip">High confidence</button>
+      <button type="button" class="filter-chip">Needs attention</button>
+    </div>
+    <ul class="email-list">
+      
+    <li>
+      <button type="button" class="email-list-item" data-active="true">
+        <div class="email-list-item-top">
+          <span class="email-list-item-from">sarah.chen@example.com</span>
+          <span class="email-list-item-time">Wed</span>
+        </div>
+        <div class="email-list-item-subject">Can you review the Q3 roadmap doc before Friday?</div>
+        <p class="email-list-item-snippet">Hey,</p>
+        <div class="email-list-item-meta">
+          <span class="tag-chip">Work</span>
+          <span class="match-chip" data-level="mid">55% match</span>
+        </div>
+      </button>
+    </li>
+
+    <li>
+      <button type="button" class="email-list-item" data-active="false">
+        <div class="email-list-item-top">
+          <span class="email-list-item-from">you@example.com</span>
+          <span class="email-list-item-time">Wed</span>
+        </div>
+        <div class="email-list-item-subject">RE: Can you review the Q3 roadmap doc before Friday?</div>
+        <p class="email-list-item-snippet">Sent my comments on the doc. Still waiting to hear back on the budget line before I can give final sign-off. Let me know once that&#39;s confirmed.</p>
+        <div class="email-list-item-meta">
+          <span class="tag-chip">Work</span>
+          <span class="match-chip" data-level="mid">58% match</span>
+        </div>
+      </button>
+    </li>
+
+    <li>
+      <button type="button" class="email-list-item" data-active="false">
+        <div class="email-list-item-top">
+          <span class="email-list-item-from">billing@saastool.com</span>
+          <span class="email-list-item-time">Fri</span>
+        </div>
+        <div class="email-list-item-subject">Your invoice is ready — INV-88213</div>
+        <p class="email-list-item-snippet">Your monthly invoice for SaaSTool Pro ($29.00) is now available. Payment will be automatically charged to your card on file on Oct 1.</p>
+        <div class="email-list-item-meta">
+          <span class="tag-chip">Receipt</span>
+          <span class="match-chip" data-level="mid">60% match</span>
+        </div>
+      </button>
+    </li>
+
+    <li>
+      <button type="button" class="email-list-item" data-active="false">
+        <div class="email-list-item-top">
+          <span class="email-list-item-from">notifications@github.com</span>
+          <span class="email-list-item-time">Tue</span>
+        </div>
+        <div class="email-list-item-subject">[org/repo] New comment on issue #482</div>
+        <p class="email-list-item-snippet">alice commented on issue #482:</p>
+        <div class="email-list-item-meta">
+          <span class="tag-chip">Notification</span>
+          <span class="match-chip" data-level="mid">62% match</span>
+        </div>
+      </button>
+    </li>
+
+    <li>
+      <button type="button" class="email-list-item" data-active="false">
+        <div class="email-list-item-top">
+          <span class="email-list-item-from">security@bankcorp.com</span>
+          <span class="email-list-item-time">Thu</span>
+        </div>
+        <div class="email-list-item-subject">Unusual sign-in activity on your account</div>
+        <p class="email-list-item-snippet">We noticed a new sign-in to your account from an unrecognized device in a new location. If this was you, no action is needed. If not, please secure your account immediately by resetting your password.</p>
+        <div class="email-list-item-meta">
+          <span class="tag-chip">Notification</span>
+          <span class="match-chip" data-level="mid">67% match</span>
+        </div>
+      </button>
+    </li>
+
+    <li>
+      <button type="button" class="email-list-item" data-active="false">
+        <div class="email-list-item-top">
+          <span class="email-list-item-from">no-reply@stripe.com</span>
+          <span class="email-list-item-time">Tue</span>
+        </div>
+        <div class="email-list-item-subject">Your receipt from Acme Corp — $49.00</div>
+        <p class="email-list-item-snippet">Thanks for your payment of $49.00 to Acme Corp on Sep 21, 2026.</p>
+        <div class="email-list-item-meta">
+          <span class="tag-chip">Receipt</span>
+          <span class="match-chip" data-level="mid">71% match</span>
+        </div>
+      </button>
+    </li>
+
+    <li>
+      <button type="button" class="email-list-item" data-active="false">
+        <div class="email-list-item-top">
+          <span class="email-list-item-from">digest@techweekly.com</span>
+          <span class="email-list-item-time">Sep 20</span>
+        </div>
+        <div class="email-list-item-subject">This Week in Tech: 12 stories you might have missed</div>
+        <p class="email-list-item-snippet">Our top picks from this week&#39;s tech news, curated for you. This week: the latest in AI infra, a deep dive on edge compute, and more.</p>
+        <div class="email-list-item-meta">
+          <span class="tag-chip">Newsletter</span>
+          <span class="match-chip" data-level="mid">73% match</span>
+        </div>
+      </button>
+    </li>
+
+    <li>
+      <button type="button" class="email-list-item" data-active="false">
+        <div class="email-list-item-top">
+          <span class="email-list-item-from">marketing@bigretailer.com</span>
+          <span class="email-list-item-time">Sep 20</span>
+        </div>
+        <div class="email-list-item-subject">🔥 Fall Sale: 40% off everything, this weekend only!</div>
+        <p class="email-list-item-snippet">Don&#39;t miss out on our biggest sale of the season! 40% off everything storewide, this weekend only. Shop now before it&#39;s gone.</p>
+        <div class="email-list-item-meta">
+          <span class="tag-chip">Bulk/Marketing</span>
+          <span class="match-chip" data-level="mid">78% match</span>
+        </div>
+      </button>
+    </li>
+
+    <li>
+      <button type="button" class="email-list-item" data-active="false">
+        <div class="email-list-item-top">
+          <span class="email-list-item-from">calendar-notifications@example.com</span>
+          <span class="email-list-item-time">Wed</span>
+        </div>
+        <div class="email-list-item-subject">Reminder: 1:1 with Priya tomorrow at 2pm</div>
+        <p class="email-list-item-snippet">This is a reminder for your upcoming event: 1:1 with Priya, tomorrow at 2:00 PM.</p>
+        <div class="email-list-item-meta">
+          <span class="tag-chip">Notification</span>
+          <span class="match-chip" data-level="high">82% match</span>
+        </div>
+      </button>
+    </li>
+
+    <li>
+      <button type="button" class="email-list-item" data-active="false">
+        <div class="email-list-item-top">
+          <span class="email-list-item-from">mom@example.com</span>
+          <span class="email-list-item-time">Wed</span>
+        </div>
+        <div class="email-list-item-subject">Dinner Sunday?</div>
+        <p class="email-list-item-snippet">Hi honey,</p>
+        <div class="email-list-item-meta">
+          <span class="tag-chip">Personal</span>
+          <span class="match-chip" data-level="high">85% match</span>
+        </div>
+      </button>
+    </li>
+
+    <li>
+      <button type="button" class="email-list-item" data-active="false">
+        <div class="email-list-item-top">
+          <span class="email-list-item-from">old-friend@example.com</span>
+          <span class="email-list-item-time">Sep 18</span>
+        </div>
+        <div class="email-list-item-subject">It&#39;s been a while!</div>
+        <p class="email-list-item-snippet">Hey! I saw on social media you moved to a new city — how&#39;s it going? We should catch up sometime, it&#39;s been way too long. Let me know if you&#39;re ever back in town.</p>
+        <div class="email-list-item-meta">
+          <span class="tag-chip">Personal</span>
+          <span class="match-chip" data-level="high">88% match</span>
+        </div>
+      </button>
+    </li>
+
+    <li>
+      <button type="button" class="email-list-item" data-active="false">
+        <div class="email-list-item-top">
+          <span class="email-list-item-from">j.martinez@vendorcorp.com</span>
+          <span class="email-list-item-time">Sep 20</span>
+        </div>
+        <div class="email-list-item-subject">RE: Contract renewal terms</div>
+        <p class="email-list-item-snippet">Following up on my email from last week regarding the contract renewal. We need your decision by end of month to lock in the current pricing. Happy to jump on a call if that&#39;s easier.</p>
+        <div class="email-list-item-meta">
+          <span class="tag-chip">Work</span>
+          <span class="match-chip" data-level="high">91% match</span>
+        </div>
+      </button>
+    </li>
+
+    <li>
+      <button type="button" class="email-list-item" data-active="false">
+        <div class="email-list-item-top">
+          <span class="email-list-item-from">team-updates@project-tool.com</span>
+          <span class="email-list-item-time">Mon</span>
+        </div>
+        <div class="email-list-item-subject">Weekly digest: 14 updates in your workspace</div>
+        <p class="email-list-item-snippet">Here&#39;s what happened in your workspace this week: 14 task updates, 3 new comments, 1 completed milestone. View the full digest on your dashboard.</p>
+        <div class="email-list-item-meta">
+          <span class="tag-chip">Notification</span>
+          <span class="match-chip" data-level="high">95% match</span>
+        </div>
+      </button>
+    </li>
+    </ul>
+  </div>
+  
+    <div class="detail-pane">
+      <div class="detail-header">
+        <div>
+          <h1 class="detail-subject">Can you review the Q3 roadmap doc before Friday?</h1>
+          <div class="detail-from">sarah.chen@example.com · sarah.chen@example.com</div>
+        </div>
+        <div class="detail-actions">
+          <button type="button" class="btn-outline">Reject</button>
+          <button type="button" class="btn-solid">Approve &amp; send</button>
+        </div>
+      </div>
+      <div class="correction-bar">
+        <select aria-label="Response" disabled><option>To Respond</option></select>
+        <select aria-label="Tag" disabled><option>Work</option></select>
+        <select aria-label="Priority" disabled><option>P8</option></select>
+        <button type="button" class="btn-ghost">Save correction</button>
+      </div>
+      <div class="original-message">
+        <div class="original-message-header">
+          <span class="email-list-item-from">SA</span>
+          <span>sarah.chen@example.com wrote · Wed</span>
+        </div>
+        <p class="original-message-body">Hey,
+
+Wanted to check if you had a chance to look at the Q3 roadmap doc I shared last week. I need your sign-off before Friday&#39;s leadership review. Let me know if you have any concerns or if we should hop on a call.
+
+Thanks,
+Sarah</p>
+      </div>
+      <div class="draft-panel">
+        <div class="draft-panel-header">
+          <span class="draft-panel-title">Drafted reply</span>
+          <span class="draft-panel-note">Classified by Jev</span>
+          <span class="draft-panel-match" data-level="mid">55%</span>
+        </div>
+        <textarea class="draft-textarea" rows="8">Hi sarah.chen,
+
+Thanks for the note — I'll take a look and get back to you shortly.
+
+Best,
+J. Reviewer</textarea>
+        <div class="draft-panel-tools">
+          <button type="button" class="btn-outline" disabled title="Not implemented yet">Shorter</button>
+          <button type="button" class="btn-outline" disabled title="Not implemented yet">Warmer</button>
+          <button type="button" class="btn-outline" disabled title="Not implemented yet">More formal</button>
+        </div>
+      </div>
+    </div>
+</div>
+</body></html>

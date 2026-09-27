@@ -222,6 +222,40 @@ describe("subsequent-run history sync", () => {
     );
     expect(gmail.messagesList).not.toHaveBeenCalled();
   });
+
+  it("leaves the sync-state cursor untouched when the time budget runs out mid-page", async () => {
+    ddbMock.on(GetCommand, { TableName: SYNC_TABLE }).resolves({
+      Item: { pk: "gmail-history-cursor", mode: "history", historyId: "500" },
+    });
+    ddbMock
+      .on(GetCommand, { TableName: EMAILS_TABLE })
+      .resolves({ Item: undefined });
+    ddbMock.on(PutCommand).resolves({});
+
+    const gmail = makeFakeGmailClient({
+      historyList: vi.fn().mockResolvedValue({
+        messageIdsAdded: ["msg-new"],
+        historyId: "600",
+        nextPageToken: undefined,
+      }),
+      messagesGet: vi
+        .fn()
+        .mockResolvedValue(makeParsedMessage({ messageId: "msg-new" })),
+    });
+    const deps = makeDeps({ getGmailClient: async () => gmail });
+    const handler = createHandler(deps);
+    const exhaustedContext: Pick<Context, "getRemainingTimeInMillis"> = {
+      getRemainingTimeInMillis: () => 1_000,
+    };
+
+    const result = await handler({} as never, exhaustedContext);
+
+    expect(result).toEqual({ statusCode: 200, body: "ok" });
+    const syncStatePuts = ddbMock
+      .commandCalls(PutCommand)
+      .filter((c) => c.args[0].input.TableName === SYNC_TABLE);
+    expect(syncStatePuts).toHaveLength(0);
+  });
 });
 
 describe("GmailHistoryExpiredError fallback", () => {

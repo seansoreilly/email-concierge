@@ -23,7 +23,7 @@ import {
   contentTagLabelName,
   responseStateLabelName,
 } from "@email-concierge/gmail-client/src/labels.ts";
-import type { EmailRecord } from "@email-concierge/shared";
+import type { Classification, EmailRecord } from "@email-concierge/shared";
 import type { Context, ScheduledEvent } from "aws-lambda";
 
 /**
@@ -65,13 +65,11 @@ export type PollGmailClient = Pick<
   | "refreshLabelAllowlist"
 >;
 
-interface SyncState {
-  pk: string;
-  mode: "backfill" | "history";
-  historyId?: string;
-  backfillPageToken?: string;
-  updatedAt: string;
-}
+type SyncCursor =
+  | { mode: "backfill"; backfillPageToken?: string }
+  | { mode: "history"; historyId: string };
+
+type SyncState = SyncCursor & { pk: string; updatedAt: string };
 
 /** Minimal surface poll-lambda needs from a DynamoDB doc client - narrowed for easy test fakes. */
 export type PollDocClient = Pick<DynamoDBDocumentClient, "send">;
@@ -129,7 +127,7 @@ async function getSyncState(
 
 async function putSyncState(
   deps: PollLambdaDeps,
-  state: Omit<SyncState, "pk" | "updatedAt">,
+  state: SyncCursor,
 ): Promise<void> {
   const item: SyncState = {
     pk: SYNC_STATE_PK,
@@ -197,14 +195,9 @@ async function processMessage(
     headers: message.headers,
   });
 
-  const statusLabelId = labelAllowlist.get(
-    responseStateLabelName(classification.responseState),
-  );
-  const tagLabelId = labelAllowlist.get(
-    contentTagLabelName(classification.contentTag),
-  );
-  const addLabelIds = [statusLabelId, tagLabelId].filter((id): id is string =>
-    Boolean(id),
+  const addLabelIds = resolveLabelIdsForClassification(
+    classification,
+    labelAllowlist,
   );
 
   const record: EmailRecord = {
@@ -300,6 +293,24 @@ async function processMessages(
   return { harvestedHistoryId, allProcessed: true };
 }
 
+/**
+ * Resolves the Gmail label IDs to apply for a classification, filtering out
+ * any response-state/content-tag labels not present in the label allowlist
+ * (e.g. a label that hasn't been created in Gmail yet).
+ */
+function resolveLabelIdsForClassification(
+  classification: Classification,
+  labelAllowlist: ReadonlyMap<string, string>,
+): string[] {
+  const statusLabelId = labelAllowlist.get(
+    responseStateLabelName(classification.responseState),
+  );
+  const tagLabelId = labelAllowlist.get(
+    contentTagLabelName(classification.contentTag),
+  );
+  return [statusLabelId, tagLabelId].filter((id): id is string => Boolean(id));
+}
+
 /** Compares two Gmail historyId strings numerically (they're decimal, but too large for safe number comparison). */
 function maxHistoryId(a: string, b: string | undefined): string {
   if (!b) return a;
@@ -384,8 +395,6 @@ async function runHistorySync(
 ): Promise<void> {
   let pageToken: string | undefined;
   let latestHistoryId = startHistoryId;
-  let finishedAllPages = false;
-  let ranOutOfBudget = false;
 
   do {
     const { messageIdsAdded, historyId, nextPageToken } =
@@ -405,22 +414,18 @@ async function runHistorySync(
     );
 
     if (!allProcessed) {
-      ranOutOfBudget = true;
-      break;
+      // Ran out of budget mid-page - leave the cursor untouched and return
+      // immediately. The next tick re-walks from startHistoryId, and the
+      // per-message GetItem pre-check makes re-walking already-processed
+      // messages cheap.
+      return;
     }
 
     pageToken = nextPageToken;
-    if (!pageToken) {
-      finishedAllPages = true;
-    }
   } while (pageToken);
 
-  if (finishedAllPages && !ranOutOfBudget) {
-    await putSyncState(deps, { mode: "history", historyId: latestHistoryId });
-  }
-  // If we ran out of budget mid-page, leave the cursor untouched - the next
-  // tick re-walks from startHistoryId, and the per-message GetItem
-  // pre-check makes re-walking already-processed messages cheap.
+  // Pagination completed normally (no more pages) - persist the cursor.
+  await putSyncState(deps, { mode: "history", historyId: latestHistoryId });
 }
 
 export function createHandler(
@@ -462,7 +467,7 @@ export function createHandler(
             gmail,
             labelAllowlist,
             classifier,
-            syncState.historyId ?? "",
+            syncState.historyId,
             context,
           );
         } catch (err) {

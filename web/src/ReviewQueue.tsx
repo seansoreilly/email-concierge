@@ -10,6 +10,14 @@ import { fetchAuthSession, signOut } from "aws-amplify/auth";
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { apiUrlFor } from "./env";
+import {
+  confidenceFields,
+  confidenceLevel,
+  formatReceived,
+  minConfidence,
+  sortByConfidence,
+  sourceLabel,
+} from "./queue-logic";
 
 /** CSSProperties doesn't model custom properties; this narrow alias documents
  *  that `--fill` is the one custom property the gauge bar's CSS reads. */
@@ -23,58 +31,6 @@ const PRIORITY_OPTIONS: number[] = Array.from(
   { length: PRIORITY_MAX - PRIORITY_MIN + 1 },
   (_, i) => PRIORITY_MIN + i,
 );
-
-interface ConfidenceField {
-  name: string;
-  value: number;
-}
-
-/** The three independent confidences, in the order the gauge displays them. */
-function confidenceFields(record: EmailRecord): ConfidenceField[] {
-  const c = record.classification;
-  return [
-    { name: "Response", value: c.responseStateConfidence },
-    { name: "Tag", value: c.contentTagConfidence },
-    { name: "Priority", value: c.priorityConfidence },
-  ];
-}
-
-/** Lowest of the three per-field confidences - the value the review queue sorts by. */
-function minConfidence(record: EmailRecord): number {
-  return Math.min(...confidenceFields(record).map((f) => f.value));
-}
-
-function confidenceLevel(value: number): "low" | "mid" | "high" {
-  if (value < 0.5) return "low";
-  if (value < 0.8) return "mid";
-  return "high";
-}
-
-function sourceLabel(source: EmailRecord["classification"]["source"]): string {
-  switch (source) {
-    case "jev":
-      return "Classified by Jev";
-    case "haiku":
-      return "Classified by Haiku (fallback)";
-    case "heuristic":
-      return "Sorted by rule";
-    case "human":
-      return "Corrected by you";
-  }
-}
-
-function formatReceived(receivedAt: string): string {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(new Date(receivedAt));
-  } catch {
-    return receivedAt;
-  }
-}
 
 async function getIdToken(): Promise<string> {
   const session = await fetchAuthSession();
@@ -332,9 +288,7 @@ export function ReviewQueue(): JSX.Element {
         // Sort once, lowest-confidence-first, at load time. A later correction
         // updates the record in place (see handleSaved) without re-sorting, so
         // a saved row doesn't jump position under the user's cursor.
-        const initialSort = [...parsed].sort(
-          (a, b) => minConfidence(a) - minConfidence(b),
-        );
+        const initialSort = sortByConfidence(parsed);
 
         if (!cancelled) {
           setEmails(initialSort);

@@ -282,7 +282,7 @@ cents per 1,000 with the Jev-first cascade already in place here).
 
 ## Verification
 
-- `pnpm lint` (Biome, whole repo) · `pnpm -r typecheck` · `pnpm -r test` (85 tests, mocked AWS/Gmail/Anthropic — no live network calls in CI)
+- `pnpm lint` (Biome, whole repo) · `pnpm -r typecheck` · `pnpm -r test` (95 tests, mocked AWS/Gmail/Anthropic — no live network calls in CI)
 - `pnpm -r build` produces every Lambda's `dist/index.mjs` (required before `terraform plan`/`apply`, since `data.archive_file` zips them) and the SPA's `web/dist/`
 - GitHub Actions CI (`.github/workflows/ci.yml`) runs all of the above plus `terraform validate` (with `-backend=false`, no AWS credentials needed in CI) on every push/PR
 - `terraform validate && terraform plan` clean before every `apply` (all infra is applied and live as of this writing)

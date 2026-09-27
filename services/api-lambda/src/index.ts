@@ -37,20 +37,15 @@ import type {
  * Real DynamoDB-backed handler for the API Gateway HTTP API v2 -> api-lambda
  * wiring (replaces the earlier stub).
  *
- * Routing dispatches on method + path rather than `routeKey` so this works
- * whether the sibling Terraform config wires explicit route keys (e.g.
- * "GET /emails") or a single "$default" catch-all integration - confirmed
- * deployed with explicit route keys ("GET /emails",
- * "POST /emails/{messageId}/correction") behind a Cognito JWT authorizer.
+ * Routing dispatches on `event.routeKey`, matching the explicit route keys
+ * Terraform wires in infra/apigateway.tf ("GET /emails" and
+ * "POST /emails/{messageId}/correction") behind a Cognito JWT authorizer -
+ * there is no "$default" catch-all deployment, so no fallback routing or
+ * path-regex extraction is needed.
  */
 
-const ddbClient = new DynamoDBClient({});
-const docClient = DynamoDBDocumentClient.from(ddbClient, {
-  marshallOptions: { removeUndefinedValues: true },
-});
-const secretsClient = new SecretsManagerClient({});
-
-const CORRECTION_PATH_PATTERN = /^\/emails\/([^/]+)\/correction$/;
+const LIST_EMAILS_ROUTE = "GET /emails";
+const SUBMIT_CORRECTION_ROUTE = "POST /emails/{messageId}/correction";
 
 /** Minimal surface the correction handler needs from GmailClient - narrowed for easy test fakes. */
 type CorrectionGmailClient = Pick<
@@ -58,28 +53,45 @@ type CorrectionGmailClient = Pick<
   "batchModify" | "refreshLabelAllowlist"
 >;
 
-/**
- * Sourced from AWS Secrets Manager by default; overridable in tests so no
- * live Secrets Manager/Gmail call is ever made during `pnpm test`.
- */
-let getGmailClient: () => Promise<CorrectionGmailClient> = async () => {
-  const secretArn = process.env.GMAIL_OAUTH_SECRET_ARN;
-  if (!secretArn) {
-    throw new GmailNotConfiguredError();
-  }
-  return createGmailClientFromSecret(
-    secretArn,
-    secretsClient,
-    GetSecretValueCommand,
-  );
-};
-
-/** Test-only seam - never called from production code. */
-export function __setGmailClientFactoryForTests(
-  factory: typeof getGmailClient,
-): void {
-  getGmailClient = factory;
+export interface ApiLambdaDeps {
+  getGmailClient: () => Promise<CorrectionGmailClient>;
+  docClient: DynamoDBDocumentClient;
+  emailsTableName: () => string;
 }
+
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`${name} environment variable is not set`);
+  }
+  return value;
+}
+
+const defaultDdbClient = new DynamoDBClient({});
+const defaultDocClient = DynamoDBDocumentClient.from(defaultDdbClient, {
+  marshallOptions: { removeUndefinedValues: true },
+});
+const defaultSecretsClient = new SecretsManagerClient({});
+
+const defaultDeps: ApiLambdaDeps = {
+  // Sourced from AWS Secrets Manager by default. Deliberately throws
+  // GmailNotConfiguredError (not a generic Error) when the secret ARN isn't
+  // set yet, so syncCorrectionToGmail's silent-skip branch applies instead
+  // of logging it as a real failure.
+  getGmailClient: async () => {
+    const secretArn = process.env.GMAIL_OAUTH_SECRET_ARN;
+    if (!secretArn) {
+      throw new GmailNotConfiguredError();
+    }
+    return createGmailClientFromSecret(
+      secretArn,
+      defaultSecretsClient,
+      GetSecretValueCommand,
+    );
+  },
+  docClient: defaultDocClient,
+  emailsTableName: () => requireEnv("EMAILS_TABLE_NAME"),
+};
 
 function jsonResponse(
   statusCode: number,
@@ -88,18 +100,12 @@ function jsonResponse(
   return { statusCode, body: JSON.stringify(payload) };
 }
 
-function requireTableName(): string {
-  const tableName = process.env.EMAILS_TABLE_NAME;
-  if (!tableName) {
-    throw new Error("EMAILS_TABLE_NAME environment variable is not set");
-  }
-  return tableName;
-}
-
-async function handleListEmails(): Promise<APIGatewayProxyResultV2> {
+async function handleListEmails(
+  deps: ApiLambdaDeps,
+): Promise<APIGatewayProxyResultV2> {
   try {
-    const result = await docClient.send(
-      new ScanCommand({ TableName: requireTableName() }),
+    const result = await deps.docClient.send(
+      new ScanCommand({ TableName: deps.emailsTableName() }),
     );
     const items = result.Items ?? [];
     const emails: EmailRecord[] = [];
@@ -122,16 +128,6 @@ async function handleListEmails(): Promise<APIGatewayProxyResultV2> {
   }
 }
 
-function extractMessageId(event: APIGatewayProxyEventV2): string | undefined {
-  const fromPathParams = event.pathParameters?.messageId;
-  if (fromPathParams) {
-    return decodeURIComponent(fromPathParams);
-  }
-  const match = event.requestContext.http.path.match(CORRECTION_PATH_PATTERN);
-  const captured = match?.[1];
-  return captured ? decodeURIComponent(captured) : undefined;
-}
-
 function decodeBody(event: APIGatewayProxyEventV2): string {
   if (!event.body) {
     return "";
@@ -139,6 +135,22 @@ function decodeBody(event: APIGatewayProxyEventV2): string {
   return event.isBase64Encoded
     ? Buffer.from(event.body, "base64").toString("utf8")
     : event.body;
+}
+
+/**
+ * Resolves the Gmail label IDs implied by a classification's
+ * responseState/contentTag, filtering out any that aren't in the current
+ * label allowlist. Shared by both the previous and corrected classification
+ * lookups in syncCorrectionToGmail.
+ */
+function resolveLabelIdsForClassification(
+  labelAllowlist: ReadonlyMap<string, string>,
+  classification: Pick<Classification, "responseState" | "contentTag">,
+): string[] {
+  return [
+    labelAllowlist.get(responseStateLabelName(classification.responseState)),
+    labelAllowlist.get(contentTagLabelName(classification.contentTag)),
+  ].filter((id): id is string => Boolean(id));
 }
 
 /**
@@ -150,23 +162,23 @@ function decodeBody(event: APIGatewayProxyEventV2): string {
  * succeeded by the time this is called.
  */
 async function syncCorrectionToGmail(
+  deps: ApiLambdaDeps,
   messageId: string,
   previous: Pick<Classification, "responseState" | "contentTag">,
   corrected: CorrectionRequestType,
 ): Promise<void> {
   try {
-    const gmail = await getGmailClient();
+    const gmail = await deps.getGmailClient();
     const labelAllowlist = await gmail.refreshLabelAllowlist();
 
-    const previousLabelIds = [
-      labelAllowlist.get(responseStateLabelName(previous.responseState)),
-      labelAllowlist.get(contentTagLabelName(previous.contentTag)),
-    ].filter((id): id is string => Boolean(id));
-
-    const correctedLabelIds = [
-      labelAllowlist.get(responseStateLabelName(corrected.responseState)),
-      labelAllowlist.get(contentTagLabelName(corrected.contentTag)),
-    ].filter((id): id is string => Boolean(id));
+    const previousLabelIds = resolveLabelIdsForClassification(
+      labelAllowlist,
+      previous,
+    );
+    const correctedLabelIds = resolveLabelIdsForClassification(
+      labelAllowlist,
+      corrected,
+    );
 
     if (correctedLabelIds.length === 0 && previousLabelIds.length === 0) {
       return;
@@ -194,9 +206,10 @@ async function syncCorrectionToGmail(
 }
 
 async function handleCorrection(
+  deps: ApiLambdaDeps,
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyResultV2> {
-  const messageId = extractMessageId(event);
+  const messageId = event.pathParameters?.messageId;
   if (!messageId) {
     return jsonResponse(400, { error: "Missing messageId in path" });
   }
@@ -218,9 +231,9 @@ async function handleCorrection(
   const correction = correctionResult.data;
 
   try {
-    const table = requireTableName();
+    const table = deps.emailsTableName();
 
-    const existing = await docClient.send(
+    const existing = await deps.docClient.send(
       new GetCommand({ TableName: table, Key: { messageId } }),
     );
     if (!existing.Item) {
@@ -249,34 +262,29 @@ async function handleCorrection(
       corrected: correction,
     };
 
-    const updateResult = await docClient.send(
+    const correctedClassification: Classification = {
+      ...correction,
+      responseStateConfidence: 1,
+      contentTagConfidence: 1,
+      priorityConfidence: 1,
+      source: "human",
+    };
+
+    const updateResult = await deps.docClient.send(
       new UpdateCommand({
         TableName: table,
         Key: { messageId },
         ConditionExpression: "attribute_exists(#mid)",
         UpdateExpression:
-          "SET #c.#rs = :rs, #c.#ct = :ct, #c.#pr = :pr, " +
-          "#c.#rsc = :fullConfidence, #c.#ctc = :fullConfidence, #c.#prc = :fullConfidence, " +
-          "#c.#src = :human, " +
+          "SET #c = :classification, " +
           "#corr = list_append(if_not_exists(#corr, :emptyList), :newCorrection)",
         ExpressionAttributeNames: {
           "#mid": "messageId",
           "#c": "classification",
-          "#rs": "responseState",
-          "#ct": "contentTag",
-          "#pr": "priority",
-          "#rsc": "responseStateConfidence",
-          "#ctc": "contentTagConfidence",
-          "#prc": "priorityConfidence",
-          "#src": "source",
           "#corr": "corrections",
         },
         ExpressionAttributeValues: {
-          ":rs": correction.responseState,
-          ":ct": correction.contentTag,
-          ":pr": correction.priority,
-          ":fullConfidence": 1,
-          ":human": "human",
+          ":classification": correctedClassification,
           ":emptyList": [],
           ":newCorrection": [correctionRecord],
         },
@@ -300,6 +308,7 @@ async function handleCorrection(
     // correction is already durable regardless of Gmail's state.
     if (!updatedParsed.data.isFixture) {
       await syncCorrectionToGmail(
+        deps,
         messageId,
         existingParsed.data.classification,
         correction,
@@ -316,19 +325,29 @@ async function handleCorrection(
   }
 }
 
-export async function handler(
-  event: APIGatewayProxyEventV2,
-): Promise<APIGatewayProxyResultV2> {
-  const method = event.requestContext.http.method;
-  const path = event.requestContext.http.path;
-
-  if (method === "GET" && path === "/emails") {
-    return handleListEmails();
-  }
-
-  if (method === "POST" && CORRECTION_PATH_PATTERN.test(path)) {
-    return handleCorrection(event);
-  }
-
-  return jsonResponse(404, { error: "Not Found" });
+/**
+ * Lambda's Node.js runtime always invokes the exported handler with
+ * (event, context) - a default parameter on a second `deps` argument never
+ * fires, since `context` is always a real, truthy value. createHandler is
+ * the standard fix (see draft-lambda for the same pattern): bind deps via
+ * closure, export a zero-config `handler` for Lambda, and let tests call
+ * createHandler(fakeDeps) directly.
+ */
+export function createHandler(
+  deps: ApiLambdaDeps,
+): (event: APIGatewayProxyEventV2) => Promise<APIGatewayProxyResultV2> {
+  return async (
+    event: APIGatewayProxyEventV2,
+  ): Promise<APIGatewayProxyResultV2> => {
+    switch (event.routeKey) {
+      case LIST_EMAILS_ROUTE:
+        return handleListEmails(deps);
+      case SUBMIT_CORRECTION_ROUTE:
+        return handleCorrection(deps, event);
+      default:
+        return jsonResponse(404, { error: "Not Found" });
+    }
+  };
 }
+
+export const handler = createHandler(defaultDeps);

@@ -16,6 +16,7 @@ BRANCH_NAME="$(terraform output -raw amplify_branch_name)"
 DEFAULT_DOMAIN="$(terraform output -raw amplify_default_domain)"
 USER_POOL_ID="$(terraform output -raw cognito_user_pool_id)"
 CLIENT_ID="$(terraform output -raw cognito_user_pool_client_id)"
+OAUTH_DOMAIN="$(terraform output -raw cognito_hosted_ui_domain)"
 API_URL="$(terraform output -raw api_invoke_url)"
 cd "$REPO_ROOT"
 
@@ -23,6 +24,7 @@ echo "==> Writing web/.env.production"
 cat > web/.env.production <<EOF
 VITE_COGNITO_USER_POOL_ID=${USER_POOL_ID}
 VITE_COGNITO_CLIENT_ID=${CLIENT_ID}
+VITE_COGNITO_OAUTH_DOMAIN=${OAUTH_DOMAIN}
 VITE_API_URL=${API_URL}
 EOF
 

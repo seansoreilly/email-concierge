@@ -11,6 +11,11 @@ output "cognito_user_pool_client_id" {
   value       = aws_cognito_user_pool_client.spa.id
 }
 
+output "cognito_hosted_ui_domain" {
+  description = "Cognito Hosted UI domain (no scheme) - feeds VITE_COGNITO_OAUTH_DOMAIN, used for \"Sign in with Google\" redirects"
+  value       = "${aws_cognito_user_pool_domain.main.domain}.auth.${var.aws_region}.amazoncognito.com"
+}
+
 output "api_invoke_url" {
   description = "HTTP API invoke URL - feeds VITE_API_URL"
   value       = aws_apigatewayv2_stage.default.invoke_url

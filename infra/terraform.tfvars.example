@@ -1,3 +1,13 @@
 cognito_user_email  = "you@example.com"
 anthropic_api_key   = "sk-ant-..."
 openrouter_api_key  = "sk-or-..."
+
+# Google OAuth **web application** client (console.cloud.google.com ->
+# Credentials -> Create Credentials -> OAuth Client ID -> Web application).
+# Register redirect URI https://<cognito_hosted_ui_domain output>/oauth2/idpresponse
+# in GCP before first `terraform apply` with real values (the domain only
+# exists once Terraform creates it, so this is a two-step dance on first
+# setup: apply once to get the output, register the URI in GCP, apply again
+# if the client id/secret weren't already known).
+google_oauth_client_id     = "xxxxx.apps.googleusercontent.com"
+google_oauth_client_secret = "GOCSPX-..."

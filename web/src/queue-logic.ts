@@ -41,17 +41,64 @@ export function sourceLabel(
   }
 }
 
-export function formatReceived(receivedAt: string): string {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(new Date(receivedAt));
-  } catch {
+/** Compact relative timestamp for the list row: time-of-day today, "Yest"
+ *  yesterday, weekday name within the last week, else a short date. */
+export function formatReceived(
+  receivedAt: string,
+  now: Date = new Date(),
+): string {
+  const date = new Date(receivedAt);
+  if (Number.isNaN(date.getTime())) {
     return receivedAt;
   }
+
+  const startOfUtcDay = (d: Date) =>
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const daysAgo = Math.round(
+    (startOfUtcDay(now) - startOfUtcDay(date)) / (24 * 60 * 60 * 1000),
+  );
+
+  if (daysAgo === 0) {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date);
+  }
+  if (daysAgo === 1) {
+    return "Yest";
+  }
+  if (daysAgo > 1 && daysAgo < 7) {
+    return new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(
+      date,
+    );
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}
+
+/** Splits a "from" header into a display name and address, tolerating a
+ *  bare address (fixture data) or the RFC 5322 "Name <addr>" form (real Gmail). */
+export function parseFrom(from: string): { name: string; email: string } {
+  const match = from.match(/^\s*(.*?)\s*<(.+)>\s*$/);
+  if (match) {
+    const name = match[1] ?? "";
+    const email = match[2] ?? from;
+    const cleanedName = name.replace(/^"|"$/g, "");
+    return { name: cleanedName || email, email };
+  }
+  return { name: from, email: from };
+}
+
+/** Up to two initials from a display name, for the avatar badge. */
+export function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const first = parts[0];
+  if (!first) return "?";
+  if (parts.length === 1) return first.slice(0, 2).toUpperCase();
+  const last = parts[parts.length - 1] ?? first;
+  return ((first[0] ?? "") + (last[0] ?? "")).toUpperCase();
 }
 
 /** Lowest-confidence-first - the review queue's initial sort order. */

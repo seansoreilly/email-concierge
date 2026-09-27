@@ -18,15 +18,19 @@ burned in and synced to VO timing.
 
 - `assets/final/review-queue-detail.jpg` — three-panel review queue: queue list
   (left), email thread (center), drafted-reply panel with `To Respond / Work /
-  P8` classification dropdowns and a 55% confidence badge (right). Captured
-  live against the deployed Amplify app, logged in via the real Cognito
-  session, using synthetic fixture data (`pnpm seed`) — no real inbox content.
-  The reviewer-account initials and the drafted reply's real sign-off email
-  were redacted (black bars) before saving.
-- `assets/final/review-queue-invoice.jpg` — same layout, different fixture
-  (`billing@saastool.com` invoice), classified `Done / Receipt / P3`,
-  labeled "Sorted by rule" instead of "Classified by Jev" — good second shot
-  to show the taxonomy has range and more than one classification path.
+  P8` classification dropdowns and a 55% confidence badge (right), fixture
+  `sarah.chen@example.com`. Captured live against the deployed Amplify app,
+  logged in via the real Cognito session, using synthetic fixture data
+  (`pnpm seed`) — all 13 fixtures use fictional senders, no real inbox content
+  anywhere. One real element still had to be redacted: the drafted-reply
+  panel's sign-off is generated client-side from the *logged-in Cognito
+  user's* identity (`web/src/ReviewQueue.tsx`, `defaultDraftReply()`), not
+  from the database — it shows the real account regardless of which fixture
+  is selected. That line, and the reviewer-avatar corner (bottom-left), are
+  redacted (black bars) in both shots.
+- `assets/final/review-queue-awaitingreply.jpg` — same layout, different
+  fixture (`you@example.com`), classified `Awaiting Reply / Work / P5` — good
+  second shot to show a different taxonomy value.
 - `assets/raw/` — unredacted originals, kept for reference only. **Never use
   these directly in the video** — they contain the real sign-off email and
   reviewer account name. Always render from `assets/final/`.
@@ -47,7 +51,7 @@ DynamoDB table and are easy to click into by accident.
 
 **Visual:** Full-bleed `review-queue-detail.jpg`, slow Ken Burns push-in
 starting wide (full three-panel view) and settling on the drafted-reply panel
-with its confidence badge. Cut to `review-queue-invoice.jpg` at ~0:14 (quick
+with its confidence badge. Cut to `review-queue-awaitingreply.jpg` at ~0:14 (quick
 0.6s crossfade) to show a second, differently-classified email — signals
 "this handles variety," not one canned example.
 
@@ -211,7 +215,7 @@ cut)*
   frame range from silence-gaps or fixed offsets in the script — don't hand-
   guess beat durations and hope the VO fits, record first, time second.
 - **Screenshots:** import `assets/final/review-queue-detail.jpg` and
-  `assets/final/review-queue-invoice.jpg` as `<Img>` with a `<Sequence>` +
+  `assets/final/review-queue-awaitingreply.jpg` as `<Img>` with a `<Sequence>` +
   spring-based `scale`/`translate` for the Ken Burns push-in — no external Ken
   Burns library needed for a two-shot cold open.
 

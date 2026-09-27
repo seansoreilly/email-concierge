@@ -30,8 +30,6 @@ function makeFakeApi(
     labelsList: vi.fn().mockResolvedValue({ data: { labels: [] } }),
     labelsCreate: vi.fn(),
     draftsCreate: vi.fn(),
-    draftsGet: vi.fn(),
-    draftsDelete: vi.fn(),
     ...overrides,
   };
 }
@@ -361,22 +359,5 @@ describe("GmailClient read-only passthroughs", () => {
     expect(result.from).toBe("a@example.com");
     expect(result.subject).toBe("Hi");
     expect(result.bodyText).toBe("body text");
-  });
-
-  it("draftsGet and draftsDelete call through with the draft ID", async () => {
-    const api = makeFakeApi({
-      draftsGet: vi.fn().mockResolvedValue({ data: { id: "draft-1" } }),
-      draftsDelete: vi.fn().mockResolvedValue(undefined),
-    });
-    const client = new GmailClient(api);
-
-    await client.draftsGet("draft-1");
-    await client.draftsDelete("draft-1");
-
-    expect(api.draftsGet).toHaveBeenCalledWith({ userId: "me", id: "draft-1" });
-    expect(api.draftsDelete).toHaveBeenCalledWith({
-      userId: "me",
-      id: "draft-1",
-    });
   });
 });

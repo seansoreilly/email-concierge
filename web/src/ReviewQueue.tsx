@@ -9,6 +9,7 @@ import {
 import { fetchAuthSession, signOut } from "aws-amplify/auth";
 import { useEffect, useMemo, useState } from "react";
 import { apiUrlFor } from "./env";
+import { formatBodyText } from "./format-body";
 import {
   confidenceLevel,
   formatReceived,
@@ -208,7 +209,9 @@ function EmailList({
                   <div className="email-list-item-subject">
                     {record.subject || "(no subject)"}
                   </div>
-                  <p className="email-list-item-snippet">{record.snippet}</p>
+                  <p className="email-list-item-snippet">
+                    {formatBodyText(record.snippet)}
+                  </p>
                   <div className="email-list-item-meta">
                     <span className="tag-chip">
                       {record.classification.contentTag}
@@ -384,7 +387,9 @@ function EmailDetail({
             {name} wrote · {formatReceived(record.receivedAt)}
           </span>
         </div>
-        <p className="original-message-body">{record.bodyText}</p>
+        <p className="original-message-body">
+          {formatBodyText(record.bodyText)}
+        </p>
       </div>
 
       <div className="draft-panel">

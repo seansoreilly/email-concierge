@@ -28,6 +28,7 @@ import {
   PutSecretValueCommand,
   SecretsManagerClient,
 } from "@aws-sdk/client-secrets-manager";
+import type { GmailClientConfig } from "@email-concierge/gmail-client";
 import { runLoopbackConsentFlow } from "@email-concierge/gmail-client";
 
 /** Matches infra/locals.tf's `secret_names.gmail_oauth` (`"${name_prefix}/gmail-oauth"`). */
@@ -89,28 +90,16 @@ function requireString(value: string | undefined, name: string): string {
   return value;
 }
 
-export interface SecretPayload {
-  clientId: string;
-  clientSecret: string;
-  refreshToken: string;
-}
-
 /** Constructs the exact JSON shape createGmailClientFromSecret() expects. */
 export function buildSecretPayload(
   clientId: string,
   clientSecret: string,
   refreshToken: string,
-): SecretPayload {
+): GmailClientConfig {
   return { clientId, clientSecret, refreshToken };
 }
 
-export type ConsentFlowFn = (config: {
-  clientId: string;
-  clientSecret: string;
-  scopes: string[];
-  port: number;
-  onConsentUrl?: (url: string) => void;
-}) => Promise<{ refreshToken: string; consentUrl: string }>;
+export type ConsentFlowFn = typeof runLoopbackConsentFlow;
 
 export interface SecretsManagerClientLike {
   send(command: PutSecretValueCommand): Promise<unknown>;

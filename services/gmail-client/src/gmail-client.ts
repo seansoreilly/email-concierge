@@ -199,12 +199,6 @@ export interface GmailApiSurface {
   draftsCreate(
     params: gmail_v1.Params$Resource$Users$Drafts$Create,
   ): Promise<{ data: GmailDraft }>;
-  draftsGet(
-    params: gmail_v1.Params$Resource$Users$Drafts$Get,
-  ): Promise<{ data: GmailDraft }>;
-  draftsDelete(
-    params: gmail_v1.Params$Resource$Users$Drafts$Delete,
-  ): Promise<void>;
 }
 
 /**
@@ -236,10 +230,6 @@ export function buildGmailApiSurface(
     labelsList: (params) => gmail.users.labels.list(params),
     labelsCreate: (params) => gmail.users.labels.create(params),
     draftsCreate: (params) => gmail.users.drafts.create(params),
-    draftsGet: (params) => gmail.users.drafts.get(params),
-    draftsDelete: async (params) => {
-      await gmail.users.drafts.delete(params);
-    },
   };
 }
 
@@ -489,21 +479,6 @@ export class GmailClient {
     });
     return data;
   }
-
-  async draftsGet(draftId: string): Promise<GmailDraft> {
-    const { data } = await this.api.draftsGet({
-      userId: USER_ID,
-      id: draftId,
-    });
-    return data;
-  }
-
-  async draftsDelete(draftId: string): Promise<void> {
-    await this.api.draftsDelete({
-      userId: USER_ID,
-      id: draftId,
-    });
-  }
 }
 
 export function createGmailClient(config: GmailClientConfig): GmailClient {
@@ -516,10 +491,16 @@ interface SecretsManagerClientLike {
 
 /**
  * Fetches {clientId, clientSecret, refreshToken} JSON from the given
- * Secrets Manager secret ARN and constructs a ready-to-use GmailClient
- * with its label allowlist already loaded. This is the one place all
- * three Lambdas should go to get a Gmail client from Terraform-provisioned
- * config, rather than each hand-rolling the Secrets Manager call.
+ * Secrets Manager secret ARN and constructs a ready-to-use GmailClient.
+ * This is the one place all three Lambdas should go to get a Gmail
+ * client from Terraform-provisioned config, rather than each
+ * hand-rolling the Secrets Manager call.
+ *
+ * Does NOT load the label allowlist - that's a separate, potentially
+ * network-heavy step (labels.list + labels.create for any missing
+ * taxonomy labels) that only matters to callers who actually mutate
+ * labels. Call refreshLabelAllowlist() on the returned client before
+ * batchModify() if you need it.
  *
  * Throws GmailNotConfiguredError (not a generic error) when the secret
  * exists but has no version yet - the normal state between "Terraform
@@ -560,9 +541,7 @@ export async function createGmailClientFromSecret(
   }
 
   const config = parsed as GmailClientConfig;
-  const client = createGmailClient(config);
-  await client.refreshLabelAllowlist();
-  return client;
+  return createGmailClient(config);
 }
 
 function isResourceNotFoundOrNoVersion(err: unknown): boolean {

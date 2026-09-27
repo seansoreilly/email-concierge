@@ -179,7 +179,7 @@ describe("safety boundary: no send-adjacent Gmail API calls in gmail-client", ()
 
 // Positive check on invariant #2 ("exposes ONLY these methods"): every
 // gmail_v1 resource/method pair actually called anywhere in this
-// package's non-test source must be one of the nine allowlisted calls.
+// package's non-test source must be one of the seven allowlisted calls.
 // This is additive to (not a replacement for) the two tests above.
 const RESOURCE_METHOD_CALL_PATTERN = /\.users\.(\w+)\.(\w+)\s*\(/g;
 const ALLOWED_RESOURCE_METHODS = new Set([
@@ -190,12 +190,10 @@ const ALLOWED_RESOURCE_METHODS = new Set([
   "labels.list",
   "labels.create",
   "drafts.create",
-  "drafts.get",
-  "drafts.delete",
 ]);
 
 describe("safety boundary: Gmail resource/method allowlist conformance", () => {
-  it("only ever calls the nine allowlisted gmail_v1 resource.method combinations", () => {
+  it("only ever calls the seven allowlisted gmail_v1 resource.method combinations", () => {
     const calls: string[] = [];
     const disallowed: string[] = [];
 

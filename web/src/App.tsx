@@ -68,13 +68,8 @@ export function App(): JSX.Element {
   }
 
   if (status === "signedOut") {
-    return (
-      <LoginForm
-        onSignedIn={() => setStatus("signedIn")}
-        redirectError={redirectError}
-      />
-    );
+    return <LoginForm redirectError={redirectError} />;
   }
 
-  return <ReviewQueue onSignedOut={() => setStatus("signedOut")} />;
+  return <ReviewQueue />;
 }

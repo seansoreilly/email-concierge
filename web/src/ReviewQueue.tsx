@@ -13,10 +13,6 @@ import { apiUrlFor } from "./env";
  *  that `--fill` is the one custom property the gauge bar's CSS reads. */
 type GaugeFillStyle = CSSProperties & { "--fill": string };
 
-interface ReviewQueueProps {
-  onSignedOut: () => void;
-}
-
 // Priority is a contractually-fixed int range (shared/types.ts: z.number().int().min(2).max(10)).
 const PRIORITY_MIN = 2;
 const PRIORITY_MAX = 10;
@@ -90,6 +86,29 @@ async function getIdToken(): Promise<string> {
   return token;
 }
 
+/** Shared plumbing for authenticated API calls: attaches the bearer token,
+ *  checks the HTTP status, and JSON-decodes the response. Callers are
+ *  responsible for validating the shape of the decoded JSON themselves. */
+async function authenticatedJsonRequest(
+  url: string,
+  options?: RequestInit,
+): Promise<unknown> {
+  const token = await getIdToken();
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...options?.headers,
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Request failed (${response.status})`);
+  }
+
+  return (await response.json()) as unknown;
+}
+
 /** The three-tick confidence instrument - this queue's signature element.
  *  Sorting is driven by the weakest of three independent scores, not one
  *  blended number, so the gauge shows all three and marks the weakest. */
@@ -159,45 +178,16 @@ function CorrectionForm({ record, onSaved }: CorrectionFormProps): JSX.Element {
     const body: CorrectionRequest = { responseState, contentTag, priority };
 
     try {
-      const token = await getIdToken();
-      const response = await fetch(
+      const json = await authenticatedJsonRequest(
         apiUrlFor(`emails/${record.messageId}/correction`),
         {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         },
       );
-
-      if (!response.ok) {
-        throw new Error(`Save failed (${response.status})`);
-      }
-
-      const json: unknown = await response.json();
-      const parsed = EmailRecordSchema.safeParse(json);
-
-      if (parsed.success) {
-        onSaved(parsed.data);
-      } else {
-        // API returned something unexpected (e.g. still-stubbed handler) -
-        // merge the correction locally so the UI still reflects the human edit.
-        onSaved({
-          ...record,
-          classification: {
-            ...record.classification,
-            responseState,
-            contentTag,
-            priority,
-            source: "human",
-            responseStateConfidence: 1,
-            contentTagConfidence: 1,
-            priorityConfidence: 1,
-          },
-        });
-      }
+      const parsed = EmailRecordSchema.parse(json);
+      onSaved(parsed);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Save failed. Please try again.",
@@ -328,7 +318,7 @@ function EmailRow({ record, onSaved }: EmailRowProps): JSX.Element {
   );
 }
 
-export function ReviewQueue({ onSignedOut }: ReviewQueueProps): JSX.Element {
+export function ReviewQueue(): JSX.Element {
   const [state, setState] = useState<LoadState>("loading");
   const [emails, setEmails] = useState<EmailRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -338,16 +328,7 @@ export function ReviewQueue({ onSignedOut }: ReviewQueueProps): JSX.Element {
 
     async function load(): Promise<void> {
       try {
-        const token = await getIdToken();
-        const response = await fetch(apiUrlFor("emails"), {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to load emails (${response.status})`);
-        }
-
-        const json: unknown = await response.json();
+        const json = await authenticatedJsonRequest(apiUrlFor("emails"));
         const parsed = EmailRecordSchema.array().parse(json);
         // Sort once, lowest-confidence-first, at load time. A later correction
         // updates the record in place (see handleSaved) without re-sorting, so
@@ -387,8 +368,9 @@ export function ReviewQueue({ onSignedOut }: ReviewQueueProps): JSX.Element {
   }
 
   async function handleSignOut(): Promise<void> {
+    // Auth status transition is handled by the Hub "auth" listener in
+    // App.tsx (Amplify dispatches a "signedOut" event here).
     await signOut();
-    onSignedOut();
   }
 
   return (

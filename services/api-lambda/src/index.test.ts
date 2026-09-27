@@ -1,9 +1,11 @@
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
   GetCommand,
   ScanCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
+import { GmailNotConfiguredError } from "@email-concierge/gmail-client";
 import type { EmailRecord } from "@email-concierge/shared";
 import type {
   APIGatewayProxyEventV2,
@@ -11,9 +13,30 @@ import type {
 } from "aws-lambda";
 import { mockClient } from "aws-sdk-client-mock";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { __setGmailClientFactoryForTests, handler } from "./index.ts";
+import { type ApiLambdaDeps, createHandler } from "./index.ts";
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
+const testDocClient = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
+  marshallOptions: { removeUndefinedValues: true },
+});
+
+/**
+ * Builds a handler wired to the mocked DynamoDBDocumentClient (via
+ * aws-sdk-client-mock's prototype patch) and a test EMAILS_TABLE_NAME, with
+ * an overridable Gmail client factory. Defaults to the same
+ * GmailNotConfiguredError silent-skip behavior as production when unset.
+ */
+function makeHandler(
+  getGmailClient: ApiLambdaDeps["getGmailClient"] = async () => {
+    throw new GmailNotConfiguredError();
+  },
+) {
+  return createHandler({
+    getGmailClient,
+    docClient: testDocClient,
+    emailsTableName: () => "email-concierge-emails-test",
+  });
+}
 
 // The handler always returns the structured object form (never the bare
 // string form of APIGatewayProxyResultV2), but the type is a union - this
@@ -30,16 +53,6 @@ function expectStructuredResult(result: APIGatewayProxyResultV2): {
 
 beforeEach(() => {
   ddbMock.reset();
-  process.env.EMAILS_TABLE_NAME = "email-concierge-emails-test";
-  Reflect.deleteProperty(process.env, "GMAIL_OAUTH_SECRET_ARN");
-  // Default: no Gmail client factory override - production code path
-  // (unset GMAIL_OAUTH_SECRET_ARN => GmailNotConfiguredError => silent skip).
-  __setGmailClientFactoryForTests(async () => {
-    const { GmailNotConfiguredError } = await import(
-      "@email-concierge/gmail-client"
-    );
-    throw new GmailNotConfiguredError();
-  });
 });
 
 function makeEvent(
@@ -47,7 +60,7 @@ function makeEvent(
 ): APIGatewayProxyEventV2 {
   return {
     version: "2.0",
-    routeKey: "$default",
+    routeKey: "GET /emails",
     rawPath: "/emails",
     rawQueryString: "",
     headers: {},
@@ -64,7 +77,7 @@ function makeEvent(
         userAgent: "vitest",
       },
       requestId: "request-id",
-      routeKey: "$default",
+      routeKey: "GET /emails",
       stage: "$default",
       time: "26/Sep/2026:00:00:00 +0000",
       timeEpoch: 1700000000000,
@@ -102,7 +115,7 @@ describe("GET /emails", () => {
     ddbMock.on(ScanCommand).resolves({ Items: [sampleEmail] });
 
     const { statusCode, body: rawBody } = expectStructuredResult(
-      await handler(makeEvent()),
+      await makeHandler()(makeEvent()),
     );
 
     expect(statusCode).toBe(200);
@@ -117,7 +130,7 @@ describe("GET /emails", () => {
     });
 
     const { statusCode, body: rawBody } = expectStructuredResult(
-      await handler(makeEvent()),
+      await makeHandler()(makeEvent()),
     );
 
     expect(statusCode).toBe(200);
@@ -132,6 +145,7 @@ describe("POST /emails/{messageId}/correction", () => {
     messageId = "fixture-001",
   ): APIGatewayProxyEventV2 =>
     makeEvent({
+      routeKey: "POST /emails/{messageId}/correction",
       rawPath: `/emails/${messageId}/correction`,
       pathParameters: { messageId },
       body,
@@ -148,7 +162,7 @@ describe("POST /emails/{messageId}/correction", () => {
           userAgent: "vitest",
         },
         requestId: "request-id",
-        routeKey: "$default",
+        routeKey: "POST /emails/{messageId}/correction",
         stage: "$default",
         time: "26/Sep/2026:00:00:00 +0000",
         timeEpoch: 1700000000000,
@@ -185,7 +199,7 @@ describe("POST /emails/{messageId}/correction", () => {
     ddbMock.on(UpdateCommand).resolves({ Attributes: updatedRecord });
 
     const { statusCode, body: rawBody } = expectStructuredResult(
-      await handler(
+      await makeHandler()(
         correctionEvent(
           JSON.stringify({
             responseState: "Done",
@@ -203,16 +217,21 @@ describe("POST /emails/{messageId}/correction", () => {
 
     const updateCall = ddbMock.commandCalls(UpdateCommand)[0];
     expect(updateCall?.args[0].input.ExpressionAttributeValues).toMatchObject({
-      ":rs": "Done",
-      ":ct": "Work",
-      ":pr": 3,
-      ":fullConfidence": 1,
+      ":classification": {
+        responseState: "Done",
+        contentTag: "Work",
+        priority: 3,
+        responseStateConfidence: 1,
+        contentTagConfidence: 1,
+        priorityConfidence: 1,
+        source: "human",
+      },
     });
   });
 
   it("returns 400 for an invalid body", async () => {
     const { statusCode } = expectStructuredResult(
-      await handler(
+      await makeHandler()(
         correctionEvent(JSON.stringify({ responseState: "Not A Real State" })),
       ),
     );
@@ -222,7 +241,7 @@ describe("POST /emails/{messageId}/correction", () => {
 
   it("returns 400 for unparseable JSON", async () => {
     const { statusCode } = expectStructuredResult(
-      await handler(correctionEvent("not json")),
+      await makeHandler()(correctionEvent("not json")),
     );
 
     expect(statusCode).toBe(400);
@@ -232,7 +251,7 @@ describe("POST /emails/{messageId}/correction", () => {
     ddbMock.on(GetCommand).resolves({ Item: undefined });
 
     const { statusCode } = expectStructuredResult(
-      await handler(
+      await makeHandler()(
         correctionEvent(
           JSON.stringify({
             responseState: "Done",
@@ -283,6 +302,7 @@ describe("Gmail sync on correction", () => {
 
   const correctionEventFor = (messageId: string): APIGatewayProxyEventV2 =>
     makeEvent({
+      routeKey: "POST /emails/{messageId}/correction",
       rawPath: `/emails/${messageId}/correction`,
       pathParameters: { messageId },
       body: JSON.stringify({
@@ -303,7 +323,7 @@ describe("Gmail sync on correction", () => {
           userAgent: "vitest",
         },
         requestId: "request-id",
-        routeKey: "$default",
+        routeKey: "POST /emails/{messageId}/correction",
         stage: "$default",
         time: "26/Sep/2026:00:00:00 +0000",
         timeEpoch: 1700000000000,
@@ -328,10 +348,9 @@ describe("Gmail sync on correction", () => {
     ddbMock.on(UpdateCommand).resolves({ Attributes: updatedNonFixtureRecord });
 
     const gmail = makeFakeGmailClient();
-    __setGmailClientFactoryForTests(async () => gmail);
 
     const { statusCode } = expectStructuredResult(
-      await handler(correctionEventFor("real-001")),
+      await makeHandler(async () => gmail)(correctionEventFor("real-001")),
     );
 
     expect(statusCode).toBe(200);
@@ -359,10 +378,9 @@ describe("Gmail sync on correction", () => {
     ddbMock.on(UpdateCommand).resolves({ Attributes: updatedFixtureRecord });
 
     const gmail = makeFakeGmailClient();
-    __setGmailClientFactoryForTests(async () => gmail);
 
     const { statusCode } = expectStructuredResult(
-      await handler(correctionEventFor("fixture-001")),
+      await makeHandler(async () => gmail)(correctionEventFor("fixture-001")),
     );
 
     expect(statusCode).toBe(200);
@@ -374,12 +392,10 @@ describe("Gmail sync on correction", () => {
     ddbMock.on(GetCommand).resolves({ Item: nonFixtureEmail });
     ddbMock.on(UpdateCommand).resolves({ Attributes: updatedNonFixtureRecord });
 
-    __setGmailClientFactoryForTests(async () => {
-      throw new Error("Gmail API is down");
-    });
-
     const { statusCode, body: rawBody } = expectStructuredResult(
-      await handler(correctionEventFor("real-001")),
+      await makeHandler(async () => {
+        throw new Error("Gmail API is down");
+      })(correctionEventFor("real-001")),
     );
 
     expect(statusCode).toBe(200);
@@ -390,11 +406,11 @@ describe("Gmail sync on correction", () => {
   it("skips Gmail sync silently when Gmail is not configured (GmailNotConfiguredError)", async () => {
     ddbMock.on(GetCommand).resolves({ Item: nonFixtureEmail });
     ddbMock.on(UpdateCommand).resolves({ Attributes: updatedNonFixtureRecord });
-    // beforeEach already wires the default factory to throw
-    // GmailNotConfiguredError when GMAIL_OAUTH_SECRET_ARN is unset.
+    // makeHandler()'s default factory throws GmailNotConfiguredError, same
+    // as production behavior when GMAIL_OAUTH_SECRET_ARN is unset.
 
     const { statusCode } = expectStructuredResult(
-      await handler(correctionEventFor("real-001")),
+      await makeHandler()(correctionEventFor("real-001")),
     );
 
     expect(statusCode).toBe(200);
@@ -404,8 +420,9 @@ describe("Gmail sync on correction", () => {
 describe("unmatched routes", () => {
   it("returns 404 for unknown paths", async () => {
     const { statusCode } = expectStructuredResult(
-      await handler(
+      await makeHandler()(
         makeEvent({
+          routeKey: "$default",
           rawPath: "/unknown",
           requestContext: {
             accountId: "123456789012",

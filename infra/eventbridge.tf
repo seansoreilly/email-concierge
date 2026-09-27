@@ -25,7 +25,7 @@ resource "aws_scheduler_schedule" "poll_lambda" {
 # (not a resource-based aws_lambda_permission, which is how the legacy
 # CloudWatch Events rule model works).
 resource "aws_iam_role" "scheduler_invoke" {
-  name = "${local.name_prefix}-scheduler-invoke-role"
+  name = "${local.iam_name_prefix}-scheduler-invoke-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

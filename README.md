@@ -198,7 +198,7 @@ publishing status is "Testing" rather than "In production").
    ```bash
    GOOGLE_CLIENT_ID=<your client id> \
    GOOGLE_CLIENT_SECRET=<your client secret> \
-   GMAIL_OAUTH_SECRET_ARN=arn:aws:secretsmanager:us-east-1:151444831552:secret:email-concierge/gmail-oauth-4U522R \
+   GMAIL_OAUTH_SECRET_ARN=arn:aws:secretsmanager:ap-southeast-2:151444831552:secret:email-concierge/gmail-oauth-ZIWJfx \
    pnpm --filter @email-concierge/scripts oauth-bootstrap
    ```
    It prints a consent URL — open it, approve access, and the script stores the resulting
@@ -250,7 +250,8 @@ new one — the app stays single-user even with Google federation enabled.
   setup as temporary and rotate it immediately after your first successful login:
   ```bash
   aws cognito-idp admin-set-user-password \
-    --user-pool-id us-east-1_W5xKyfEfo --username seansoreilly@gmail.com \
+    --user-pool-id ap-southeast-2_dPDv8tyW3 --username seansoreilly@gmail.com \
+    --region ap-southeast-2 \
     --password '<new password, 12+ chars, upper/lower/digit/symbol>' --permanent
   ```
 - **Deploying the SPA after a change**: `pnpm --filter web build` is handled automatically by

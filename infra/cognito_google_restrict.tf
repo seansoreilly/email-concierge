@@ -90,7 +90,7 @@ data "archive_file" "cognito_pre_signup" {
 }
 
 resource "aws_iam_role" "cognito_pre_signup" {
-  name               = "${local.name_prefix}-cognito-pre-signup-role"
+  name               = "${local.iam_name_prefix}-cognito-pre-signup-role"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 
   tags = {

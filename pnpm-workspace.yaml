@@ -1,0 +1,8 @@
+packages:
+  - "shared"
+  - "services/*"
+  - "scripts"
+  - "web"
+
+onlyBuiltDependencies:
+  - esbuild

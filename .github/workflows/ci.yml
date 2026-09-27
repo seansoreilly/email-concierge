@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main, mvp]
+  pull_request:
+    branches: [main, mvp]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (produces Lambda dist/ bundles archive_file needs)
+        run: pnpm -r build
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Test
+        run: pnpm -r test
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.4"
+
+      - name: Terraform validate
+        working-directory: infra
+        run: |
+          terraform init -backend=false
+          terraform validate

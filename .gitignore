@@ -16,7 +16,6 @@ build/
 !*.tfvars.example
 crash.log
 crash.*.log
-.terraform.lock.hcl
 
 # Env/secrets
 .env

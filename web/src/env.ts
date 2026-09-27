@@ -14,6 +14,7 @@ function requireEnv(name: keyof ImportMetaEnv): string {
 export const env = {
   cognitoUserPoolId: requireEnv("VITE_COGNITO_USER_POOL_ID"),
   cognitoClientId: requireEnv("VITE_COGNITO_CLIENT_ID"),
+  cognitoOauthDomain: requireEnv("VITE_COGNITO_OAUTH_DOMAIN"),
   apiUrl: requireEnv("VITE_API_URL"),
 };
 

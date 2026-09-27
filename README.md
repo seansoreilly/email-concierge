@@ -213,6 +213,36 @@ publishing status is "Testing" rather than "In production").
    labeling each one, and creating `Concierge/Status/*` and `Concierge/Tag/*` labels in Gmail on
    first use. "To Respond" emails will get a draft reply within the same or a following cycle.
 
+## Google sign-in for the web UI (optional, separate from the step above)
+
+The web UI's "Sign in with Google" button is a *different* OAuth client than the Gmail API
+access above — that one is a "Desktop app" client used server-side by `poll-lambda`/
+`draft-lambda`; this one is a "Web application" client used by the browser via Cognito's Hosted
+UI. Email/password sign-in (Cognito SRP) keeps working either way — this is an additional path,
+not a replacement, so a break here never locks you out.
+
+Sign-in is restricted to the single Cognito user (`var.cognito_user_email`) by a Pre Sign-up
+Lambda trigger (`infra/cognito_google_restrict.tf`): any other Google account is rejected before
+a session is issued, and a matching one is linked to the existing user rather than provisioning a
+new one — the app stays single-user even with Google federation enabled.
+
+1. **Google Cloud Console**, same project as the Gmail OAuth client (or a different one) — **APIs
+   & Services → Credentials → Create Credentials → OAuth Client ID**, application type **Web
+   application**. Add an authorized redirect URI of
+   `https://<cognito_hosted_ui_domain output>/oauth2/idpresponse` (get the exact value with
+   `terraform output cognito_hosted_ui_domain` after the first apply below — the domain only
+   exists once Terraform creates it, so this is a two-step dance on a from-scratch setup: apply
+   once, register the URI, apply again).
+2. Add `google_oauth_client_id` and `google_oauth_client_secret` to `infra/terraform.tfvars` (see
+   `infra/terraform.tfvars.example` for the shape) and `terraform apply`.
+3. For local dev, `web/.env`'s `VITE_COGNITO_OAUTH_DOMAIN` must match the
+   `cognito_hosted_ui_domain` output, and the dev server must be reachable at
+   `http://localhost:5173/` — not `http://127.0.0.1:5173/`. Cognito's callback URL allowlist
+   accepts `http://localhost` as its one documented http exception; `127.0.0.1` is rejected as
+   non-https. On WSL2, `localhost` resolves to `::1` — bind Vite to that explicitly
+   (`vite --host localhost` or the Vite default with no `--host` override) rather than
+   `--host 127.0.0.1`.
+
 ## Credentials recap
 
 - **Web UI login**: `seansoreilly@gmail.com`. A permanent password was set during this build for

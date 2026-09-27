@@ -1,15 +1,35 @@
-import { signIn } from "aws-amplify/auth";
+import { signIn, signInWithRedirect } from "aws-amplify/auth";
 import { type FormEvent, useState } from "react";
 
 interface LoginFormProps {
   onSignedIn: () => void;
+  redirectError: string | null;
 }
 
-export function LoginForm({ onSignedIn }: LoginFormProps): JSX.Element {
+export function LoginForm({
+  onSignedIn,
+  redirectError,
+}: LoginFormProps): JSX.Element {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [googleRedirecting, setGoogleRedirecting] = useState(false);
+
+  async function handleGoogleSignIn(): Promise<void> {
+    setError(null);
+    setGoogleRedirecting(true);
+    try {
+      await signInWithRedirect({ provider: "Google" });
+    } catch (err) {
+      setGoogleRedirecting(false);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Google sign-in failed. Please try again.",
+      );
+    }
+  }
 
   async function handleSubmit(
     event: FormEvent<HTMLFormElement>,
@@ -57,6 +77,18 @@ export function LoginForm({ onSignedIn }: LoginFormProps): JSX.Element {
       <div className="login-card">
         <p className="login-eyebrow">Email Concierge</p>
         <h1 className="login-title">Sign in to review the queue</h1>
+        {redirectError ? <p className="form-error">{redirectError}</p> : null}
+        <button
+          type="button"
+          className="btn-google"
+          onClick={handleGoogleSignIn}
+          disabled={googleRedirecting}
+        >
+          {googleRedirecting ? "Redirecting…" : "Sign in with Google"}
+        </button>
+        <div className="login-divider">
+          <span>or</span>
+        </div>
         <form onSubmit={handleSubmit}>
           <div className="field">
             <label className="field-label" htmlFor="email">

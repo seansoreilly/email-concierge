@@ -6,6 +6,16 @@ Amplify.configure({
     Cognito: {
       userPoolId: env.cognitoUserPoolId,
       userPoolClientId: env.cognitoClientId,
+      loginWith: {
+        oauth: {
+          domain: env.cognitoOauthDomain,
+          scopes: ["openid", "email", "profile"],
+          redirectSignIn: [`${window.location.origin}/`],
+          redirectSignOut: [`${window.location.origin}/`],
+          responseType: "code",
+          providers: ["Google"],
+        },
+      },
     },
   },
 });

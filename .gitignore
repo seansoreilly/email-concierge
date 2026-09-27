@@ -32,3 +32,4 @@ crash.*.log
 
 # Logs
 *.log
+video/assets/raw/

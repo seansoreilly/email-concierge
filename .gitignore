@@ -16,6 +16,8 @@ build/
 !*.tfvars.example
 crash.log
 crash.*.log
+*.tfplan
+tfplan
 
 # Env/secrets
 .env
@@ -28,7 +30,12 @@ crash.*.log
 
 # Claude Code local session artifacts
 .claude/scheduled_tasks.lock
+.claude/settings.local.json
 .claude/worktrees/
+
+# Test/tooling output
+coverage/
+*.tsbuildinfo
 
 # Logs
 *.log

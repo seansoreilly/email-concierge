@@ -26,6 +26,9 @@ importers:
       '@aws-sdk/lib-dynamodb':
         specifier: ^3.700.0
         version: 3.1141.0(@aws-sdk/client-dynamodb@3.1141.0)
+      '@email-concierge/classifier':
+        specifier: workspace:*
+        version: link:../services/classifier
       '@email-concierge/gmail-client':
         specifier: workspace:*
         version: link:../services/gmail-client

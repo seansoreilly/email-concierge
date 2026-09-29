@@ -26,6 +26,7 @@
  */
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { decideAction } from "@email-concierge/classifier";
 import { fixtureEmails } from "@email-concierge/shared/fixtures/emails.ts";
 import {
   type EmailRecord,
@@ -56,6 +57,16 @@ function toEmailRecord(
     (fixture.expected.priorityMin + fixture.expected.priorityMax) / 2,
   );
 
+  const classification = {
+    responseState: fixture.expected.responseState,
+    responseStateConfidence: confidence,
+    contentTag: fixture.expected.contentTag,
+    contentTagConfidence: confidence,
+    priority,
+    priorityConfidence: confidence,
+    source: "heuristic",
+  } as const;
+
   return {
     messageId: fixture.messageId,
     threadId: fixture.threadId,
@@ -64,15 +75,8 @@ function toEmailRecord(
     snippet: fixture.snippet,
     bodyText: fixture.bodyText,
     receivedAt: fixture.receivedAt,
-    classification: {
-      responseState: fixture.expected.responseState,
-      responseStateConfidence: confidence,
-      contentTag: fixture.expected.contentTag,
-      contentTagConfidence: confidence,
-      priority,
-      priorityConfidence: confidence,
-      source: "heuristic",
-    },
+    classification,
+    plannedAction: decideAction(classification),
     appliedLabelIds: [],
     draftCreated: false,
     isFixture: true,

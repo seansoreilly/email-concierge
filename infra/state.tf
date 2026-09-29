@@ -9,7 +9,7 @@ terraform {
 
   backend "s3" {
     bucket       = "email-concierge-tfstate-151444831552"
-    key          = "email-concierge/terraform.tfstate"
+    key          = "email-concierge/ap-southeast-2/terraform.tfstate"
     region       = "us-east-1"
     encrypt      = true
     use_lockfile = true

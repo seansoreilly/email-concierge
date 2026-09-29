@@ -1,6 +1,12 @@
 locals {
   name_prefix = var.project_name
 
+  # IAM roles are an account-global namespace, unlike every other resource
+  # here (DynamoDB, Lambda, Secrets Manager, Amplify are all region-scoped) -
+  # region-qualify role names so a second regional stack can coexist in the
+  # same AWS account without name collisions.
+  iam_name_prefix = "${local.name_prefix}-${var.aws_region}"
+
   lambda_names = {
     poll  = "${local.name_prefix}-poll-lambda"
     draft = "${local.name_prefix}-draft-lambda"

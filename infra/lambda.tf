@@ -24,7 +24,7 @@ data "archive_file" "api" {
 # poll-lambda: reads/writes emails + sync_state, reads Gmail OAuth secret.
 # ---------------------------------------------------------------------------
 resource "aws_iam_role" "poll" {
-  name               = "${local.lambda_names.poll}-role"
+  name               = "${local.iam_name_prefix}-poll-lambda-role"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 
   tags = {
@@ -105,7 +105,7 @@ resource "aws_lambda_function" "poll" {
 # reads Gmail OAuth secret (to create the Gmail draft via the API).
 # ---------------------------------------------------------------------------
 resource "aws_iam_role" "draft" {
-  name               = "${local.lambda_names.draft}-role"
+  name               = "${local.iam_name_prefix}-draft-lambda-role"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 
   tags = {
@@ -241,7 +241,7 @@ resource "aws_lambda_event_source_mapping" "emails_stream_to_draft" {
 # OAuth secret (corrections may call back to Gmail to relabel/undo a draft).
 # ---------------------------------------------------------------------------
 resource "aws_iam_role" "api" {
-  name               = "${local.lambda_names.api}-role"
+  name               = "${local.iam_name_prefix}-api-lambda-role"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 
   tags = {

@@ -180,6 +180,8 @@ describe("safety boundary: no send-adjacent Gmail API calls in gmail-client", ()
 // Positive check on invariant #2 ("exposes ONLY these methods"): every
 // gmail_v1 resource/method pair actually called anywhere in this
 // package's non-test source must be one of the seven allowlisted calls.
+// archive()/unarchive() add NO entry here: they reuse messages.batchModify
+// (already listed) and only ever pass the hard-coded system label "INBOX".
 // This is additive to (not a replacement for) the two tests above.
 const RESOURCE_METHOD_CALL_PATTERN = /\.users\.(\w+)\.(\w+)\s*\(/g;
 const ALLOWED_RESOURCE_METHODS = new Set([
@@ -217,5 +219,43 @@ describe("safety boundary: Gmail resource/method allowlist conformance", () => {
     // vacuously passing because the regex matched nothing.
     expect(calls.length).toBeGreaterThanOrEqual(ALLOWED_RESOURCE_METHODS.size);
     expect(disallowed).toEqual([]);
+  });
+});
+
+// archive()/unarchive() legitimately mention the system label "INBOX"
+// (messagesList filters on it too), so INBOX is the only system label ID
+// allowed as a string literal in non-test source. TRASH/SPAM must never
+// appear at all, so no code path in this package can send them to Gmail.
+// Static text check, same caveats as above.
+const FORBIDDEN_LABEL_LITERAL_PATTERN = /["'`](TRASH|SPAM)["'`]/;
+
+describe("safety boundary: no TRASH/SPAM label IDs in gmail-client", () => {
+  it("never references TRASH or SPAM label IDs in non-test source", () => {
+    const offending: string[] = [];
+    let scanned = 0;
+    for (const file of listSourceFiles(GMAIL_CLIENT_DIR)) {
+      if (file.endsWith(".test.ts")) {
+        continue;
+      }
+      scanned += 1;
+      const contents = fs.readFileSync(file, "utf8");
+      if (FORBIDDEN_LABEL_LITERAL_PATTERN.test(contents)) {
+        offending.push(path.relative(REPO_ROOT, file));
+      }
+    }
+    expect(scanned).toBeGreaterThan(0);
+    expect(offending).toEqual([]);
+  });
+
+  it("sanity: the pattern matches known-positive samples only", () => {
+    expect(FORBIDDEN_LABEL_LITERAL_PATTERN.test('addLabelIds: ["TRASH"]')).toBe(
+      true,
+    );
+    expect(
+      FORBIDDEN_LABEL_LITERAL_PATTERN.test("removeLabelIds: ['SPAM']"),
+    ).toBe(true);
+    expect(
+      FORBIDDEN_LABEL_LITERAL_PATTERN.test('removeLabelIds: ["INBOX"]'),
+    ).toBe(false);
   });
 });

@@ -210,6 +210,74 @@ describe("GmailClient.batchModify", () => {
   });
 });
 
+describe("GmailClient.archive / unarchive", () => {
+  it("archive removes exactly INBOX and adds nothing", async () => {
+    const api = makeFakeApi();
+    const client = new GmailClient(api);
+
+    await client.archive(["msg-1", "msg-2"]);
+
+    expect(api.messagesBatchModify).toHaveBeenCalledTimes(1);
+    expect(api.messagesBatchModify).toHaveBeenCalledWith({
+      userId: "me",
+      requestBody: {
+        ids: ["msg-1", "msg-2"],
+        addLabelIds: [],
+        removeLabelIds: ["INBOX"],
+      },
+    });
+  });
+
+  it("unarchive adds exactly INBOX and removes nothing", async () => {
+    const api = makeFakeApi();
+    const client = new GmailClient(api);
+
+    await client.unarchive(["msg-1"]);
+
+    expect(api.messagesBatchModify).toHaveBeenCalledTimes(1);
+    expect(api.messagesBatchModify).toHaveBeenCalledWith({
+      userId: "me",
+      requestBody: {
+        ids: ["msg-1"],
+        addLabelIds: ["INBOX"],
+        removeLabelIds: [],
+      },
+    });
+  });
+
+  it("throws on empty messageIds without calling the API", async () => {
+    const api = makeFakeApi();
+    const client = new GmailClient(api);
+
+    await expect(client.archive([])).rejects.toThrow();
+    await expect(client.unarchive([])).rejects.toThrow();
+    expect(api.messagesBatchModify).not.toHaveBeenCalled();
+  });
+
+  it("batchModify still rejects INBOX in both add and remove", async () => {
+    const api = makeFakeApi({
+      labelsCreate: vi.fn().mockImplementation(({ requestBody }) =>
+        Promise.resolve({
+          data: fakeLabel(
+            requestBody?.name ?? "unknown",
+            `created-${requestBody?.name}`,
+          ),
+        }),
+      ),
+    });
+    const client = new GmailClient(api);
+    await client.refreshLabelAllowlist();
+
+    await expect(client.batchModify(["msg-1"], [], ["INBOX"])).rejects.toThrow(
+      LabelNotAllowedError,
+    );
+    await expect(client.batchModify(["msg-1"], ["INBOX"], [])).rejects.toThrow(
+      LabelNotAllowedError,
+    );
+    expect(api.messagesBatchModify).not.toHaveBeenCalled();
+  });
+});
+
 describe("GmailClient.labelsCreate", () => {
   it("refuses to create a label outside the Concierge/ namespace", async () => {
     const api = makeFakeApi();

@@ -91,6 +91,7 @@ resource "aws_lambda_function" "poll" {
       GMAIL_OAUTH_SECRET_ARN = aws_secretsmanager_secret.gmail_oauth.arn
       ANTHROPIC_API_KEY      = var.anthropic_api_key
       OPENROUTER_API_KEY     = var.openrouter_api_key
+      ARCHIVE_ENABLED        = tostring(var.archive_enabled)
     }
   }
 

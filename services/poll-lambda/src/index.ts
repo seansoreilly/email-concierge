@@ -10,6 +10,7 @@ import {
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
+  UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import type { Classifier } from "@email-concierge/classifier";
 import {
@@ -86,6 +87,8 @@ export interface PollLambdaDeps {
   emailsTableName: () => string;
   syncStateTableName: () => string;
   now: () => Date;
+  /** Feature flag: only the exact env string "true" enables real archiving. Defaults to reading ARCHIVE_ENABLED. */
+  archiveEnabled?: () => boolean;
 }
 
 function requireEnv(name: string): string {
@@ -117,6 +120,52 @@ const defaultDeps: PollLambdaDeps = {
   syncStateTableName: () => requireEnv("SYNC_STATE_TABLE_NAME"),
   now: () => new Date(),
 };
+
+function archiveEnabled(deps: PollLambdaDeps): boolean {
+  return deps.archiveEnabled
+    ? deps.archiveEnabled()
+    : process.env.ARCHIVE_ENABLED === "true";
+}
+
+/**
+ * Archives (removes INBOX) when the flag is on and the shadow-mode plan says
+ * archive. Best-effort: the record is already stored and labels applied, so a
+ * failure here is logged and swallowed.
+ */
+async function maybeArchive(
+  deps: PollLambdaDeps,
+  gmail: PollGmailClient,
+  messageId: string,
+  plannedAction: EmailRecord["plannedAction"],
+): Promise<void> {
+  if (!archiveEnabled(deps) || plannedAction?.action !== "archive") {
+    return;
+  }
+  try {
+    await gmail.archive([messageId]);
+  } catch (err) {
+    console.error("poll-lambda: archive failed, continuing", {
+      messageId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
+  try {
+    await deps.docClient.send(
+      new UpdateCommand({
+        TableName: deps.emailsTableName(),
+        Key: { messageId },
+        UpdateExpression: "SET archived = :t",
+        ExpressionAttributeValues: { ":t": true },
+      }),
+    );
+  } catch (err) {
+    console.error("poll-lambda: failed to persist archived flag, continuing", {
+      messageId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 
 async function getSyncState(
   deps: PollLambdaDeps,
@@ -218,7 +267,7 @@ async function processMessage(
     draftCreated: false,
     isFixture: false,
     corrections: [],
-    // Shadow mode: recorded only, nothing is archived.
+    // Recorded always; only acted on when ARCHIVE_ENABLED === "true".
     plannedAction: decideAction(classification),
   };
 
@@ -247,6 +296,8 @@ async function processMessage(
       { messageId: message.messageId, classification },
     );
   }
+
+  await maybeArchive(deps, gmail, message.messageId, record.plannedAction);
 
   return message.historyId;
 }

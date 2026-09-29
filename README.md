@@ -47,8 +47,9 @@ that sync back to Gmail and are logged for later analysis, fully Terraform-defin
 infrastructure, demoable from synthetic fixtures with no live Gmail connection required.
 
 **Is not**: capable of sending mail under any configuration (see
-[Safety invariant](#safety-invariant-no-send-ever)), capable of archiving/trashing/deleting
-mail, multi-user, agentic (see [ADR: not agentic](#adr-not-agentic-by-design)), reconciled
+[Safety invariant](#safety-invariant-no-send-ever)), capable of trashing/deleting mail (archiving is
+INBOX-label removal only and off by default, see
+[ADR: shadow-mode-then-flag archiving](#adr-shadow-mode-then-flag-archiving)), multi-user, agentic (see [ADR: not agentic](#adr-not-agentic-by-design)), reconciled
 against out-of-band Gmail-side changes (a human editing/deleting a generated draft directly in
 Gmail, or replying before a draft is generated, isn't detected), backed by a live-model
 evaluation harness (CI runs against fixtures with mocked network boundaries; there's no ongoing
@@ -129,6 +130,27 @@ narrower Gmail OAuth scope that allows one but not the other. So the boundary is
   AWS SDK v3 calls every service via `client.send(new XCommand())`, so it would false-positive
   on every DynamoDB or Secrets Manager call elsewhere in the codebase.)
 
+## ADR: shadow-mode-then-flag archiving
+
+**Decision.** Archiving shipped in two steps. First, `decideAction` (in
+`services/classifier/src/policy.ts`) ran in shadow mode: every email got a
+`plannedAction` recorded on its DynamoDB item, and nothing touched the inbox.
+That let the plans be reviewed in the UI against real mail before any behavior
+change. Second, poll-lambda gained real archiving behind `ARCHIVE_ENABLED`
+(Terraform `archive_enabled`, default `false`). Only the exact string `"true"`
+enables it. It runs after the conditional put and label writes, and a failure
+is logged without failing the message.
+
+**`archive()` is INBOX-only.** `GmailClient.archive()` can only remove the
+`INBOX` label. It cannot trash, delete, or add arbitrary labels, so the
+worst-case outcome of a bad policy decision is bounded to "not in the inbox".
+
+**Reversible.** Archived mail stays in All Mail and keeps its labels. A human
+correction to a state the policy would keep (To Respond, Awaiting Reply, or
+anything `decideAction` says to keep) calls `unarchive()` on records with
+`archived: true` and clears the flag. Applying the flag change (`terraform
+apply`) is a manual step.
+
 ## ADR: not agentic, by design
 
 This is a fixed pipeline — poll → classify → label → conditionally draft — not an agent
@@ -148,7 +170,7 @@ solves.
 infra/          Terraform — single state (S3 backend, native lockfile), single apply
 services/
   gmail-client/  thin Gmail API wrapper — see "No send, ever" above
-  classifier/    Classifier interface: JevClassifier (primary), HaikuClassifier (fallback)
+  classifier/    Classifier interface: JevClassifier (primary), HaikuClassifier (fallback), decideAction inbox policy
   poll-lambda/   EventBridge Scheduler target — polls, classifies, labels
   draft-lambda/  DynamoDB Streams target — generates and creates draft replies
   api-lambda/    API Gateway target — serves the review queue, handles corrections
@@ -158,6 +180,7 @@ shared/
 web/             Vite + React + TS SPA — Cognito login, review queue, correction UI
 scripts/
   seed-fixtures.ts    loads shared/fixtures/ into DynamoDB for a live-data-free demo
+  backfill-planned-action.ts  adds shadow-mode plannedAction to older rows (SET-only, --dry-run supported)
   oauth-bootstrap.ts  one-time local script: Gmail OAuth consent → Secrets Manager
   deploy-web.sh       manual Amplify deployment (build → zip → upload → start-deployment)
 ```
@@ -165,6 +188,9 @@ scripts/
 **Reproducing the demo on a fresh clone**: the live table is already seeded, but `pnpm seed`
 (reads `EMAILS_TABLE_NAME`, defaults to the live table name) loads the 13 fixtures into DynamoDB
 so the review queue isn't empty — no live Gmail connection required for this step.
+Re-seeding overwrites whole fixture rows, including any human corrections; to add
+`plannedAction` to existing rows without that, run `pnpm --filter @email-concierge/scripts
+backfill-planned-action -- --dry-run` first, then without `--dry-run`.
 
 ## Finishing setup (the one step only you can do)
 
@@ -282,7 +308,7 @@ cents per 1,000 with the Jev-first cascade already in place here).
 
 ## Verification
 
-- `pnpm lint` (Biome, whole repo) · `pnpm -r typecheck` · `pnpm -r test` (95 tests, mocked AWS/Gmail/Anthropic — no live network calls in CI)
+- `pnpm lint` (Biome, whole repo) · `pnpm -r typecheck` · `pnpm -r test` (156 tests, mocked AWS/Gmail/Anthropic — no live network calls in CI)
 - `pnpm -r build` produces every Lambda's `dist/index.mjs` (required before `terraform plan`/`apply`, since `data.archive_file` zips them) and the SPA's `web/dist/`
 - GitHub Actions CI (`.github/workflows/ci.yml`) runs all of the above plus `terraform validate` (with `-backend=false`, no AWS credentials needed in CI) on every push/PR
 - `terraform validate && terraform plan` clean before every `apply` (all infra is applied and live as of this writing)

@@ -43,3 +43,9 @@ variable "google_oauth_client_secret" {
   type        = string
   sensitive   = true
 }
+
+variable "archive_enabled" {
+  description = "When true, poll-lambda actually archives (removes INBOX from) messages the shadow-mode policy plans to archive. Default false = shadow mode only."
+  type        = bool
+  default     = false
+}

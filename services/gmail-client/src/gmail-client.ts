@@ -17,10 +17,16 @@ import { expectedTaxonomyLabelNames, isAppOwnedLabelName } from "./labels.js";
  *      no generic passthrough, no way to call arbitrary Gmail methods.
  *      messages.send / drafts.send / messages.trash / messages.delete
  *      are deliberately not exposed.
+ *      archive()/unarchive() reuse the already-permitted
+ *      messages.batchModify API method; they add no new Gmail API method.
  *   3. batchModify() additionally validates every label ID against an
  *      allowlist of labels this app created/owns, so even a bug
  *      elsewhere in this file can't be used to apply or remove an
- *      arbitrary Gmail label (e.g. TRASH, SPAM).
+ *      arbitrary Gmail label (e.g. TRASH, SPAM). The one deliberate
+ *      exception is archive()/unarchive(), which bypass that allowlist
+ *      ONLY to remove/add the hard-coded system label "INBOX" (nothing
+ *      else, never caller-supplied); batchModify() itself still rejects
+ *      INBOX.
  *   4. Drafts are always created with a threadId, so they sit inert in
  *      an existing thread rather than as a standalone draft.
  */
@@ -235,6 +241,13 @@ export function buildGmailApiSurface(
 
 const USER_ID = "me";
 
+/**
+ * The single system label archive()/unarchive() may ever touch. Hard-coded
+ * on purpose: it is never caller-supplied and never widened to TRASH, SPAM,
+ * UNREAD, or any other system label.
+ */
+const INBOX_LABEL_ID = "INBOX";
+
 export class LabelAllowlistNotLoadedError extends Error {
   constructor() {
     super(
@@ -254,7 +267,8 @@ export class LabelNotAllowedError extends Error {
 }
 
 /**
- * Gmail API wrapper. Exposes exactly nine methods; nothing else Gmail
+ * Gmail API wrapper. Exposes exactly eleven methods (the original nine
+ * plus archive/unarchive); nothing else Gmail
  * offers is reachable through it. See the module-level comment above
  * for the full safety rationale.
  */
@@ -385,6 +399,41 @@ export class GmailClient {
         ids: messageIds,
         addLabelIds,
         removeLabelIds,
+      },
+    });
+  }
+
+  /**
+   * Archives messages by removing ONLY the system label "INBOX". The label
+   * is a hard-coded constant, so this cannot add/remove TRASH, SPAM,
+   * UNREAD, or anything else. Deliberately does not go through
+   * batchModify()'s Concierge/* allowlist, which stays strict for callers.
+   */
+  async archive(messageIds: string[]): Promise<void> {
+    if (messageIds.length === 0) {
+      throw new Error("archive: messageIds must not be empty.");
+    }
+    await this.api.messagesBatchModify({
+      userId: USER_ID,
+      requestBody: {
+        ids: messageIds,
+        addLabelIds: [],
+        removeLabelIds: [INBOX_LABEL_ID],
+      },
+    });
+  }
+
+  /** Inverse of archive(): adds ONLY the system label "INBOX". */
+  async unarchive(messageIds: string[]): Promise<void> {
+    if (messageIds.length === 0) {
+      throw new Error("unarchive: messageIds must not be empty.");
+    }
+    await this.api.messagesBatchModify({
+      userId: USER_ID,
+      requestBody: {
+        ids: messageIds,
+        addLabelIds: [INBOX_LABEL_ID],
+        removeLabelIds: [],
       },
     });
   }

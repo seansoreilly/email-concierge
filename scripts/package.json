@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "seed": "tsx seed-fixtures.ts",
+    "backfill-planned-action": "tsx backfill-planned-action.ts",
     "oauth-bootstrap": "tsx oauth-bootstrap.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -13,6 +14,7 @@
     "@aws-sdk/client-dynamodb": "^3.700.0",
     "@aws-sdk/client-secrets-manager": "^3.700.0",
     "@aws-sdk/lib-dynamodb": "^3.700.0",
+    "@email-concierge/classifier": "workspace:*",
     "@email-concierge/gmail-client": "workspace:*",
     "@email-concierge/shared": "workspace:*"
   },

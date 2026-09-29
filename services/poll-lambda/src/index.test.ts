@@ -11,6 +11,7 @@ import {
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
+  UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import type { Classifier } from "@email-concierge/classifier";
 import type { GmailClient } from "@email-concierge/gmail-client";
@@ -91,6 +92,8 @@ function makeFakeGmailClient(
     }),
     messagesGet: vi.fn().mockResolvedValue(makeParsedMessage()),
     batchModify: vi.fn().mockResolvedValue(undefined),
+    archive: vi.fn().mockResolvedValue(undefined),
+    unarchive: vi.fn().mockResolvedValue(undefined),
     refreshLabelAllowlist: vi.fn().mockResolvedValue(
       new Map<string, string>([
         ["Concierge/Status/To Respond", "label-status-to-respond"],
@@ -332,6 +335,7 @@ describe("new message processing", () => {
       isFixture: false,
       draftCreated: false,
       corrections: [],
+      plannedAction: { action: "keep", reason: expect.any(String) },
     });
 
     expect(gmail.batchModify).toHaveBeenCalledWith(
@@ -339,6 +343,8 @@ describe("new message processing", () => {
       expect.arrayContaining(["label-status-to-respond", "label-tag-work"]),
       [],
     );
+    // Shadow mode: labels are only ever added, never removed (no archive).
+    expect(vi.mocked(gmail.batchModify).mock.calls[0]?.[2]).toEqual([]);
   });
 
   it("treats an already-existing message (ConditionalCheckFailedException) as a safe no-op, not an error", async () => {
@@ -486,5 +492,97 @@ describe("new message processing", () => {
     expect(putCalls[0]?.args[0].input.Item).toMatchObject({
       messageId: "msg-good",
     });
+  });
+});
+
+describe("archiving (feature-flagged)", () => {
+  const archiveClassification: Classification = {
+    responseState: "Done",
+    responseStateConfidence: 0.95,
+    contentTag: "Bulk/Marketing",
+    contentTagConfidence: 0.95,
+    priority: 2,
+    priorityConfidence: 0.95,
+    source: "heuristic",
+  };
+
+  const order: string[] = [];
+  beforeEach(() => {
+    order.length = 0;
+  });
+
+  async function run(
+    enabled: boolean,
+    classification: Classification,
+    archive: PollGmailClient["archive"],
+  ): Promise<PollGmailClient> {
+    ddbMock
+      .on(GetCommand, { TableName: SYNC_TABLE })
+      .resolves({ Item: undefined })
+      .on(GetCommand, { TableName: EMAILS_TABLE })
+      .resolves({ Item: undefined });
+    ddbMock.on(PutCommand).callsFake(() => {
+      order.push("put");
+      return {};
+    });
+    ddbMock.on(UpdateCommand).resolves({});
+    const gmail = makeFakeGmailClient({
+      archive,
+      messagesList: vi.fn().mockResolvedValue({
+        messageIds: ["msg-a"],
+        nextPageToken: undefined,
+      }),
+      messagesGet: vi
+        .fn()
+        .mockResolvedValue(makeParsedMessage({ messageId: "msg-a" })),
+    });
+    const deps = makeDeps({
+      getGmailClient: async () => gmail,
+      createClassifier: () => ({
+        classify: vi.fn().mockResolvedValue(classification),
+      }),
+      archiveEnabled: () => enabled,
+    });
+    const result = await createHandler(deps)({} as never, fullContext);
+    expect(result).toEqual({ statusCode: 200, body: "ok" });
+    return gmail;
+  }
+
+  it("never archives when the flag is off, even if the plan says archive", async () => {
+    const archive = vi.fn().mockResolvedValue(undefined);
+    const gmail = await run(false, archiveClassification, archive);
+    expect(gmail.archive).not.toHaveBeenCalled();
+    const put = ddbMock.commandCalls(PutCommand)[0]?.args[0].input.Item;
+    expect(put?.plannedAction).toMatchObject({ action: "archive" });
+    expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(0);
+  });
+
+  it("archives once, after the put, when flag on and plan is archive", async () => {
+    const archive = vi.fn().mockImplementation(async () => {
+      order.push("archive");
+    });
+    const gmail = await run(true, archiveClassification, archive);
+    expect(gmail.archive).toHaveBeenCalledTimes(1);
+    expect(gmail.archive).toHaveBeenCalledWith(["msg-a"]);
+    expect(order.indexOf("put")).toBeLessThan(order.indexOf("archive"));
+    const update = ddbMock.commandCalls(UpdateCommand)[0]?.args[0].input;
+    expect(update?.ExpressionAttributeValues).toEqual({ ":t": true });
+  });
+
+  it("does not archive when flag on but plan is keep", async () => {
+    const archive = vi.fn().mockResolvedValue(undefined);
+    const gmail = await run(true, sampleClassification, archive);
+    expect(gmail.archive).not.toHaveBeenCalled();
+  });
+
+  it("keeps the stored record and does not crash when archive throws", async () => {
+    const archive = vi.fn().mockRejectedValue(new Error("gmail down"));
+    const gmail = await run(true, archiveClassification, archive);
+    expect(gmail.archive).toHaveBeenCalledTimes(1);
+    const emailPuts = ddbMock
+      .commandCalls(PutCommand)
+      .filter((c) => c.args[0].input.TableName === EMAILS_TABLE);
+    expect(emailPuts).toHaveLength(1);
+    expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(0);
   });
 });

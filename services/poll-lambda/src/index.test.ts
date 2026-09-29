@@ -91,6 +91,8 @@ function makeFakeGmailClient(
     }),
     messagesGet: vi.fn().mockResolvedValue(makeParsedMessage()),
     batchModify: vi.fn().mockResolvedValue(undefined),
+    archive: vi.fn().mockResolvedValue(undefined),
+    unarchive: vi.fn().mockResolvedValue(undefined),
     refreshLabelAllowlist: vi.fn().mockResolvedValue(
       new Map<string, string>([
         ["Concierge/Status/To Respond", "label-status-to-respond"],

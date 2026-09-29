@@ -62,6 +62,8 @@ export type PollGmailClient = Pick<
   | "messagesList"
   | "messagesGet"
   | "batchModify"
+  | "archive"
+  | "unarchive"
   | "refreshLabelAllowlist"
 >;
 

@@ -50,7 +50,7 @@ const SUBMIT_CORRECTION_ROUTE = "POST /emails/{messageId}/correction";
 /** Minimal surface the correction handler needs from GmailClient - narrowed for easy test fakes. */
 type CorrectionGmailClient = Pick<
   GmailClient,
-  "batchModify" | "refreshLabelAllowlist"
+  "batchModify" | "archive" | "unarchive" | "refreshLabelAllowlist"
 >;
 
 export interface ApiLambdaDeps {

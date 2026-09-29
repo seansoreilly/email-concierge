@@ -61,6 +61,16 @@ export const CorrectionRecord = z.object({
 });
 export type CorrectionRecord = z.infer<typeof CorrectionRecord>;
 
+export const PolicyAction = z.enum(["keep", "archive"]);
+export type PolicyAction = z.infer<typeof PolicyAction>;
+
+// Shadow-mode inbox policy: the action the policy WOULD take. Recorded only, never executed.
+export const PlannedAction = z.object({
+  action: PolicyAction,
+  reason: z.string(),
+});
+export type PlannedAction = z.infer<typeof PlannedAction>;
+
 export const EmailRecord = z.object({
   messageId: z.string(),
   threadId: z.string(),
@@ -75,6 +85,7 @@ export const EmailRecord = z.object({
   draftId: z.string().optional(),
   isFixture: z.boolean().default(false),
   corrections: z.array(CorrectionRecord).default([]),
+  plannedAction: PlannedAction.optional(),
 });
 export type EmailRecord = z.infer<typeof EmailRecord>;
 

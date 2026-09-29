@@ -332,6 +332,7 @@ describe("new message processing", () => {
       isFixture: false,
       draftCreated: false,
       corrections: [],
+      plannedAction: { action: "keep", reason: expect.any(String) },
     });
 
     expect(gmail.batchModify).toHaveBeenCalledWith(
@@ -339,6 +340,8 @@ describe("new message processing", () => {
       expect.arrayContaining(["label-status-to-respond", "label-tag-work"]),
       [],
     );
+    // Shadow mode: labels are only ever added, never removed (no archive).
+    expect(vi.mocked(gmail.batchModify).mock.calls[0]?.[2]).toEqual([]);
   });
 
   it("treats an already-existing message (ConditionalCheckFailedException) as a safe no-op, not an error", async () => {

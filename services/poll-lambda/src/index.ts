@@ -12,7 +12,10 @@ import {
   PutCommand,
 } from "@aws-sdk/lib-dynamodb";
 import type { Classifier } from "@email-concierge/classifier";
-import { createDefaultClassifier } from "@email-concierge/classifier";
+import {
+  createDefaultClassifier,
+  decideAction,
+} from "@email-concierge/classifier";
 import type { GmailClient, ParsedMessage } from "@email-concierge/gmail-client";
 import {
   GmailHistoryExpiredError,
@@ -213,6 +216,8 @@ async function processMessage(
     draftCreated: false,
     isFixture: false,
     corrections: [],
+    // Shadow mode: recorded only, nothing is archived.
+    plannedAction: decideAction(classification),
   };
 
   try {

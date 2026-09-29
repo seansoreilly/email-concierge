@@ -11,11 +11,17 @@ import { useEffect, useMemo, useState } from "react";
 import { apiUrlFor } from "./env";
 import { formatBodyText } from "./format-body";
 import {
+  type ListFilter,
+  type ShadowStats,
   confidenceLevel,
+  filterEmails,
+  formatOverrideRate,
   formatReceived,
   initials,
+  isWouldArchive,
   minConfidence,
   parseFrom,
+  shadowStats,
   sortByConfidence,
   sourceLabel,
 } from "./queue-logic";
@@ -25,8 +31,6 @@ type LoadState = "loading" | "ready" | "error";
 /** Where a reviewed email sits, tracked client-side only: the API has no
  *  concept of approve/reject/send yet, so this never leaves the browser. */
 type QueueStatus = "needs-review" | "approved" | "sent" | "rejected";
-
-type ListFilter = "all" | "high-confidence" | "needs-attention";
 
 const PRIORITY_OPTIONS: number[] = Array.from(
   { length: PRIORITY_MAX - PRIORITY_MIN + 1 },
@@ -140,6 +144,36 @@ interface EmailListProps {
   onSelect: (messageId: string) => void;
   filter: ListFilter;
   onFilterChange: (filter: ListFilter) => void;
+  stats: ShadowStats;
+}
+
+/** Subtle "Would archive" marker; the policy's reason is the tooltip. Renders
+ *  nothing for keep rows and for old rows with no plannedAction. */
+function WouldArchiveBadge({
+  record,
+}: { record: EmailRecord }): JSX.Element | null {
+  if (!isWouldArchive(record)) return null;
+  return (
+    <span className="archive-chip" title={record.plannedAction?.reason}>
+      Would archive
+    </span>
+  );
+}
+
+function ShadowSummary({ stats }: { stats: ShadowStats }): JSX.Element {
+  return (
+    <div
+      className="shadow-summary"
+      title="Override rate: reviewed would-archive emails you corrected to something the policy would keep, out of all reviewed would-archive emails."
+    >
+      <span>Shadow mode</span>
+      <span>{stats.wouldArchive} would archive</span>
+      <span>
+        Override rate {formatOverrideRate(stats.overrideRate)}
+        {stats.reviewed > 0 ? ` (${stats.overridden}/${stats.reviewed})` : ""}
+      </span>
+    </div>
+  );
 }
 
 /** Filtering lives in the parent (ReviewQueue) so that queue-switching,
@@ -152,6 +186,7 @@ function EmailList({
   onSelect,
   filter,
   onFilterChange,
+  stats,
 }: EmailListProps): JSX.Element {
   return (
     <div className="email-list-pane">
@@ -184,7 +219,16 @@ function EmailList({
         >
           Needs attention
         </button>
+        <button
+          type="button"
+          className="filter-chip"
+          data-active={filter === "would-archive"}
+          onClick={() => onFilterChange("would-archive")}
+        >
+          Would archive
+        </button>
       </div>
+      <ShadowSummary stats={stats} />
       <ul className="email-list">
         {emails.length === 0 ? (
           <li className="email-list-empty">Nothing here.</li>
@@ -222,6 +266,7 @@ function EmailList({
                     >
                       {match}% match
                     </span>
+                    <WouldArchiveBadge record={record} />
                   </div>
                 </button>
               </li>
@@ -378,6 +423,13 @@ function EmailDetail({
         </div>
       </div>
 
+      {isWouldArchive(record) ? (
+        <p className="archive-note">
+          <WouldArchiveBadge record={record} />
+          {record.plannedAction?.reason}
+        </p>
+      ) : null}
+
       <CorrectionBar record={record} onSaved={onSaved} />
 
       <div className="original-message">
@@ -520,18 +572,10 @@ export function ReviewQueue(): JSX.Element {
    *  what's actually on screen, so it drives the list, next-selection after
    *  an action, and the detail-pane fallback alike. */
   const visibleEmails = useMemo(() => {
-    if (listFilter === "high-confidence") {
-      return queueEmails.filter(
-        (e) => confidenceLevel(minConfidence(e)) === "high",
-      );
-    }
-    if (listFilter === "needs-attention") {
-      return queueEmails.filter(
-        (e) => confidenceLevel(minConfidence(e)) !== "high",
-      );
-    }
-    return queueEmails;
+    return filterEmails(queueEmails, listFilter);
   }, [queueEmails, listFilter]);
+
+  const stats = useMemo(() => shadowStats(emails), [emails]);
 
   const counts = useMemo(() => {
     const result: Record<QueueStatus, number> = {
@@ -610,6 +654,7 @@ export function ReviewQueue(): JSX.Element {
             onSelect={setSelectedId}
             filter={listFilter}
             onFilterChange={setListFilter}
+            stats={stats}
           />
           {selectedRecord ? (
             <EmailDetail

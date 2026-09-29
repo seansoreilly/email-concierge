@@ -574,6 +574,41 @@ button {
   padding: 0.1rem 0.4rem;
 }
 
+.archive-chip {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--qa-text-soft);
+  border: 1px dashed var(--qa-border);
+  border-radius: 4px;
+  padding: 0.05rem 0.4rem;
+  cursor: help;
+}
+
+.archive-note {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--qa-text-soft);
+}
+
+.shadow-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.9rem;
+  padding: 0 1.1rem 0.75rem;
+  font-size: 0.72rem;
+  color: var(--qa-text-soft);
+}
+
+.shadow-summary span:first-child {
+  font-weight: 700;
+  color: var(--qa-text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .match-chip {
   font-size: 0.7rem;
   font-weight: 600;

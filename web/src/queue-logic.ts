@@ -105,3 +105,84 @@ export function initials(name: string): string {
 export function sortByConfidence(records: EmailRecord[]): EmailRecord[] {
   return [...records].sort((a, b) => minConfidence(a) - minConfidence(b));
 }
+
+export type ListFilter =
+  | "all"
+  | "high-confidence"
+  | "needs-attention"
+  | "would-archive";
+
+/** True when the shadow-mode policy would archive this email. Rows written
+ *  before the policy existed have no plannedAction and count as not archived. */
+export function isWouldArchive(record: EmailRecord): boolean {
+  return record.plannedAction?.action === "archive";
+}
+
+/** Narrows a queue's emails by the active filter chip. Pure so the parent can
+ *  use one result for the list, next-selection and the detail fallback. */
+export function filterEmails(
+  records: EmailRecord[],
+  filter: ListFilter,
+): EmailRecord[] {
+  switch (filter) {
+    case "high-confidence":
+      return records.filter(
+        (e) => confidenceLevel(minConfidence(e)) === "high",
+      );
+    case "needs-attention":
+      return records.filter(
+        (e) => confidenceLevel(minConfidence(e)) !== "high",
+      );
+    case "would-archive":
+      return records.filter(isWouldArchive);
+    case "all":
+      return records;
+  }
+}
+
+/** Approximates "the policy would now keep this email", judged on the most
+ *  recent human correction: keep if the corrected responseState is To Respond
+ *  or Awaiting Reply, OR corrected priority >= 5, OR corrected contentTag is
+ *  not Bulk/Marketing. False when the record has never been corrected. */
+export function correctionImpliesKeep(record: EmailRecord): boolean {
+  const last = record.corrections[record.corrections.length - 1];
+  if (!last) return false;
+  const { responseState, priority, contentTag } = last.corrected;
+  return (
+    responseState === "To Respond" ||
+    responseState === "Awaiting Reply" ||
+    priority >= 5 ||
+    contentTag !== "Bulk/Marketing"
+  );
+}
+
+export interface ShadowStats {
+  /** Emails the policy would archive. */
+  wouldArchive: number;
+  /** Would-archive emails a human has corrected at least once. */
+  reviewed: number;
+  /** Reviewed would-archive emails whose correction implies "keep". */
+  overridden: number;
+  /** overridden / reviewed in [0, 1], or null when nothing is reviewed yet. */
+  overrideRate: number | null;
+}
+
+/** Shadow-mode summary. OVERRIDE RATE = overridden / reviewed, where
+ *  - reviewed   = would-archive emails with corrections.length > 0
+ *  - overridden = reviewed emails for which correctionImpliesKeep() is true
+ *  A null rate (denominator 0) is displayed as "n/a". */
+export function shadowStats(records: EmailRecord[]): ShadowStats {
+  const archived = records.filter(isWouldArchive);
+  const reviewed = archived.filter((e) => e.corrections.length > 0);
+  const overridden = reviewed.filter(correctionImpliesKeep).length;
+  return {
+    wouldArchive: archived.length,
+    reviewed: reviewed.length,
+    overridden,
+    overrideRate: reviewed.length === 0 ? null : overridden / reviewed.length,
+  };
+}
+
+export function formatOverrideRate(rate: number | null): string {
+  return rate === null ? "n/a" : `${Math.round(rate * 100)}%`;
+}

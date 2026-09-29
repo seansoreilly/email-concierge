@@ -12,6 +12,7 @@ import {
   ScanCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
+import { decideAction } from "@email-concierge/classifier";
 import type { GmailClient } from "@email-concierge/gmail-client";
 import {
   GmailNotConfiguredError,
@@ -205,6 +206,54 @@ async function syncCorrectionToGmail(
   }
 }
 
+/**
+ * Best-effort un-archive after a human correction: if the message was
+ * archived by the app and the corrected classification would not be archived
+ * by the policy, put it back in the inbox and clear the archived flag. Never
+ * throws.
+ */
+async function maybeUnarchive(
+  deps: ApiLambdaDeps,
+  messageId: string,
+  archived: boolean | undefined,
+  corrected: Classification,
+): Promise<boolean> {
+  if (archived !== true) {
+    return false;
+  }
+  const keepInInbox =
+    corrected.responseState === "To Respond" ||
+    corrected.responseState === "Awaiting Reply" ||
+    decideAction(corrected).action === "keep";
+  if (!keepInInbox) {
+    return false;
+  }
+  try {
+    const gmail = await deps.getGmailClient();
+    await gmail.unarchive([messageId]);
+    await deps.docClient.send(
+      new UpdateCommand({
+        TableName: deps.emailsTableName(),
+        Key: { messageId },
+        UpdateExpression: "SET archived = :f",
+        ExpressionAttributeValues: { ":f": false },
+      }),
+    );
+    return true;
+  } catch (error) {
+    if (error instanceof GmailNotConfiguredError) {
+      console.log("Gmail not configured yet - skipping unarchive", messageId);
+      return false;
+    }
+    console.error(
+      "Failed to unarchive after correction (DynamoDB update already succeeded)",
+      messageId,
+      error,
+    );
+    return false;
+  }
+}
+
 async function handleCorrection(
   deps: ApiLambdaDeps,
   event: APIGatewayProxyEventV2,
@@ -313,6 +362,15 @@ async function handleCorrection(
         existingParsed.data.classification,
         correction,
       );
+      const unarchived = await maybeUnarchive(
+        deps,
+        messageId,
+        updatedParsed.data.archived,
+        updatedParsed.data.classification,
+      );
+      if (unarchived) {
+        return jsonResponse(200, { ...updatedParsed.data, archived: false });
+      }
     }
 
     return jsonResponse(200, updatedParsed.data);

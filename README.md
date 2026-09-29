@@ -129,6 +129,27 @@ narrower Gmail OAuth scope that allows one but not the other. So the boundary is
   AWS SDK v3 calls every service via `client.send(new XCommand())`, so it would false-positive
   on every DynamoDB or Secrets Manager call elsewhere in the codebase.)
 
+## ADR: shadow-mode-then-flag archiving
+
+**Decision.** Archiving shipped in two steps. First, `decideAction` (in
+`services/classifier/src/policy.ts`) ran in shadow mode: every email got a
+`plannedAction` recorded on its DynamoDB item, and nothing touched the inbox.
+That let the plans be reviewed in the UI against real mail before any behavior
+change. Second, poll-lambda gained real archiving behind `ARCHIVE_ENABLED`
+(Terraform `archive_enabled`, default `false`). Only the exact string `"true"`
+enables it. It runs after the conditional put and label writes, and a failure
+is logged without failing the message.
+
+**`archive()` is INBOX-only.** `GmailClient.archive()` can only remove the
+`INBOX` label. It cannot trash, delete, or add arbitrary labels, so the
+worst-case outcome of a bad policy decision is bounded to "not in the inbox".
+
+**Reversible.** Archived mail stays in All Mail and keeps its labels. A human
+correction to a state the policy would keep (To Respond, Awaiting Reply, or
+anything `decideAction` says to keep) calls `unarchive()` on records with
+`archived: true` and clears the flag. Applying the flag change (`terraform
+apply`) is a manual step.
+
 ## ADR: not agentic, by design
 
 This is a fixed pipeline — poll → classify → label → conditionally draft — not an agent

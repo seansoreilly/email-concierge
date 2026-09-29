@@ -414,3 +414,84 @@ describe("unmatched routes", () => {
     expect(statusCode).toBe(404);
   });
 });
+
+describe("Un-archive on correction", () => {
+  const archivedEmail: EmailRecord = {
+    ...sampleEmail,
+    messageId: "real-002",
+    isFixture: false,
+    archived: true,
+  };
+
+  const eventTo = (responseState: string): APIGatewayProxyEventV2 =>
+    makeEvent({
+      routeKey: "POST /emails/{messageId}/correction",
+      path: "/emails/real-002/correction",
+      method: "POST",
+      pathParameters: { messageId: "real-002" },
+      body: JSON.stringify({ responseState, contentTag: "Work", priority: 7 }),
+    });
+
+  function fakeGmail() {
+    return {
+      batchModify: vi.fn().mockResolvedValue(undefined),
+      archive: vi.fn().mockResolvedValue(undefined),
+      unarchive: vi.fn().mockResolvedValue(undefined),
+      refreshLabelAllowlist: vi
+        .fn()
+        .mockResolvedValue(new Map<string, string>()),
+    };
+  }
+
+  function stubDynamo(existing: EmailRecord): void {
+    ddbMock.on(GetCommand).resolves({ Item: existing });
+    ddbMock.on(UpdateCommand).resolves({
+      Attributes: {
+        ...existing,
+        classification: {
+          ...existing.classification,
+          responseState: "To Respond",
+          source: "human",
+        },
+      },
+    });
+  }
+
+  it("unarchives and clears archived when corrected to To Respond", async () => {
+    stubDynamo(archivedEmail);
+    const gmail = fakeGmail();
+    const { statusCode, body } = expectStructuredResult(
+      await makeHandler(async () => gmail)(eventTo("To Respond")),
+    );
+    expect(statusCode).toBe(200);
+    expect(gmail.unarchive).toHaveBeenCalledWith(["real-002"]);
+    expect((JSON.parse(body) as EmailRecord).archived).toBe(false);
+    const flagUpdate = ddbMock
+      .commandCalls(UpdateCommand)
+      .find((c) => c.args[0].input.ExpressionAttributeValues?.[":f"] === false);
+    expect(flagUpdate).toBeDefined();
+  });
+
+  it.each([false, undefined])(
+    "does not unarchive when archived is %s",
+    async (archived) => {
+      stubDynamo({ ...archivedEmail, archived });
+      const gmail = fakeGmail();
+      const { statusCode } = expectStructuredResult(
+        await makeHandler(async () => gmail)(eventTo("To Respond")),
+      );
+      expect(statusCode).toBe(200);
+      expect(gmail.unarchive).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not fail the response when unarchive throws", async () => {
+    stubDynamo(archivedEmail);
+    const gmail = fakeGmail();
+    gmail.unarchive.mockRejectedValue(new Error("gmail down"));
+    const { statusCode } = expectStructuredResult(
+      await makeHandler(async () => gmail)(eventTo("To Respond")),
+    );
+    expect(statusCode).toBe(200);
+  });
+});

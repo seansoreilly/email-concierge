@@ -86,6 +86,7 @@ export const EmailRecord = z.object({
   isFixture: z.boolean().default(false),
   corrections: z.array(CorrectionRecord).default([]),
   plannedAction: PlannedAction.optional(),
+  archived: z.boolean().optional(),
 });
 export type EmailRecord = z.infer<typeof EmailRecord>;
 

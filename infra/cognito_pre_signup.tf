@@ -31,6 +31,9 @@ data "aws_iam_policy_document" "cognito_pre_signup" {
   }
 }
 
+# LEARN: The SAME module as poll/draft/api, called a 4th time with different
+# inputs - the payoff of the module. Differences are only data: a bundled
+# source file instead of an esbuild output, tiny sizing, one env var.
 module "cognito_pre_signup" {
   source = "./modules/service_lambda"
 
@@ -47,6 +50,9 @@ module "cognito_pre_signup" {
   }
 }
 
+# LEARN: Same "resource-based permission" pattern as API Gateway in
+# apigateway.tf: without it Cognito's trigger call is denied. `source_arn`
+# restricts the grant to THIS user pool (not any pool in the account).
 resource "aws_lambda_permission" "cognito_invoke_pre_signup" {
   statement_id  = "AllowCognitoInvokePreSignUp"
   action        = "lambda:InvokeFunction"

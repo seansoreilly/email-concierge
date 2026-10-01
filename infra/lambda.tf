@@ -2,7 +2,18 @@
 # build script at the path in local.lambda_dist_path (the hard contract with
 # services/*-lambda). The module owns zipping + the source hash so the build
 # script only needs to emit the .mjs, not a zip.
+#
+# LEARN: This file is the "caller" of modules/service_lambda. Per Lambda it
+# does three things:
+#   1. builds the IAM permissions JSON the function needs (data "aws_iam_policy_document")
+#   2. calls the module with sizing, env vars and that JSON
+#   3. (draft only) subscribes it to a DynamoDB stream
+# Permissions are built HERE, not in the module, because they differ per
+# function and reference this stack's tables/secret.
 
+# LEARN: A `locals` block can appear in any file (they all merge into one
+# namespace). This list is shared by all three policies below - define once,
+# reuse as `local.dynamodb_rw_actions`.
 locals {
   dynamodb_rw_actions = [
     "dynamodb:GetItem",
@@ -13,6 +24,10 @@ locals {
   ]
 }
 
+# LEARN: A policy document used as a reusable FRAGMENT. All three Lambdas need
+# to read the Gmail secret, so it is defined once and merged into each Lambda's
+# own document via `source_policy_documents` below. Scoped to exactly one
+# secret ARN - least privilege.
 data "aws_iam_policy_document" "gmail_secret_read" {
   statement {
     actions   = ["secretsmanager:GetSecretValue"]
@@ -24,10 +39,13 @@ data "aws_iam_policy_document" "gmail_secret_read" {
 # poll-lambda: reads/writes emails + sync_state, reads Gmail OAuth secret.
 # ---------------------------------------------------------------------------
 data "aws_iam_policy_document" "poll" {
+  # LEARN: Start from the shared fragment, then ADD this function's own
+  # statements. The final JSON = secret-read + the DynamoDB statement below.
   source_policy_documents = [data.aws_iam_policy_document.gmail_secret_read.json]
 
   statement {
     actions = local.dynamodb_rw_actions
+    # poll writes to both tables, so the resource list has two ARNs.
     resources = [
       aws_dynamodb_table.emails.arn,
       aws_dynamodb_table.sync_state.arn,
@@ -35,6 +53,10 @@ data "aws_iam_policy_document" "poll" {
   }
 }
 
+# LEARN: Calling a module. `source` is the only required meta-argument; every
+# other line sets one of the module's input variables (modules/service_lambda/
+# variables.tf). After `terraform init` registers the module, resources inside
+# live at addresses like module.poll.aws_lambda_function.this.
 module "poll" {
   source = "./modules/service_lambda"
 
@@ -49,15 +71,28 @@ module "poll" {
   timeout     = 300
   memory_size = 512
 
+  # At most ONE concurrent invocation: the schedule fires every 2 minutes, and
+  # two overlapping polls would race on the Gmail history cursor.
   reserved_concurrent_executions = 1
 
+  # LEARN: Env vars are how infra hands runtime config to code. Note the values
+  # are REFERENCES (aws_dynamodb_table.emails.name), not copied strings - if
+  # the table were renamed, this Lambda's config updates in the same apply.
+  #
+  # SECURITY NOTE: the two API keys are plain env vars, so they are visible in
+  # the Lambda console and stored in Terraform state (hence the encrypted state
+  # bucket and `sensitive = true` on the variables). Secrets Manager (as used
+  # for the Gmail token) would be the stricter option.
   environment = {
     EMAILS_TABLE_NAME      = aws_dynamodb_table.emails.name
     SYNC_STATE_TABLE_NAME  = aws_dynamodb_table.sync_state.name
     GMAIL_OAUTH_SECRET_ARN = aws_secretsmanager_secret.gmail_oauth.arn
     ANTHROPIC_API_KEY      = var.anthropic_api_key
     OPENROUTER_API_KEY     = var.openrouter_api_key
-    ARCHIVE_ENABLED        = tostring(var.archive_enabled)
+    # LEARN: env vars must be strings but the variable is a bool - tostring()
+    # converts true -> "true". (Terraform has many such built-in functions:
+    # tostring, jsonencode, dirname, lookup, ...)
+    ARCHIVE_ENABLED = tostring(var.archive_enabled)
   }
 }
 
@@ -73,6 +108,10 @@ data "aws_iam_policy_document" "draft" {
     resources = [aws_dynamodb_table.emails.arn]
   }
 
+  # LEARN: Reading a DynamoDB STREAM is a different permission set on a
+  # different resource ARN (".../stream/*") than reading the table. Lambda's
+  # stream poller uses the function's role, so the role needs these or the
+  # event source mapping below fails to create.
   statement {
     actions = [
       "dynamodb:GetRecords",
@@ -120,9 +159,17 @@ module "draft" {
 # pattern changes to a two-step put-then-update (which would mean the INSERT
 # event doesn't carry the classification map yet, and the filter would
 # silently drop those records) - see services/draft-lambda's handler.
+#
+# LEARN: An "event source mapping" is a poller AWS runs for you: it reads the
+# stream and invokes the function with batches of records. Nothing calls the
+# function directly - this resource is the glue. `stream_arn` only exists
+# because stream_enabled = true on the table (dynamodb.tf).
 resource "aws_lambda_event_source_mapping" "emails_stream_to_draft" {
-  event_source_arn  = aws_dynamodb_table.emails.stream_arn
-  function_name     = module.draft.arn
+  event_source_arn = aws_dynamodb_table.emails.stream_arn
+  # LEARN: `module.draft.arn` reads the module's `arn` output.
+  function_name = module.draft.arn
+  # LATEST = only changes from now on; TRIM_HORIZON would replay the stream's
+  # retained history (up to 24h).
   starting_position = "LATEST"
 
   # Without this, Lambda ignores draft-lambda's batchItemFailures return
@@ -138,6 +185,9 @@ resource "aws_lambda_event_source_mapping" "emails_stream_to_draft" {
 
   filter_criteria {
     filter {
+      # LEARN: jsonencode() turns an HCL object into a JSON string. The filter
+      # API wants JSON text, but writing it as HCL gives syntax checking and
+      # lets you use expressions inside it.
       pattern = jsonencode({
         eventName = ["INSERT"]
         dynamodb = {
@@ -157,6 +207,12 @@ resource "aws_lambda_event_source_mapping" "emails_stream_to_draft" {
 
   # The stream-read permissions live in the module's inline policy; the
   # mapping fails to create if they aren't attached yet.
+  #
+  # LEARN: Terraform normally infers ordering from references. Here the
+  # mapping references module.draft.arn, which only proves the FUNCTION
+  # exists - not that its role's stream policy is attached yet. That
+  # dependency is invisible in the code, so it is declared explicitly with
+  # `depends_on`. Use it sparingly: only for hidden dependencies like this.
   depends_on = [module.draft]
 }
 
@@ -192,6 +248,14 @@ module "api" {
 
 # Resource addresses moved into modules - keeps the single live state from
 # destroying/recreating the roles and functions.
+#
+# LEARN: Terraform identifies a resource by its ADDRESS in the code. When this
+# refactor moved `aws_iam_role.poll` into `module.poll.aws_iam_role.this`,
+# Terraform would see the old address vanish (-> destroy) and a new one appear
+# (-> create), even though nothing changed in AWS. A `moved {}` block says "same
+# object, new address": on the next plan, Terraform renames the entry in state
+# instead. Result: no downtime. The blocks are safe to delete once every
+# environment (here, the one live state) has applied them.
 moved {
   from = aws_iam_role.poll
   to   = module.poll.aws_iam_role.this

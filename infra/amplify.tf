@@ -8,6 +8,10 @@
 # Deployment instead goes through scripts/deploy-web.sh: build the SPA locally,
 # zip web/dist's contents, `aws amplify create-deployment` + upload + `start-deployment`.
 # aws_amplify_app with no `repository` argument works fine as a deploy target for this.
+#
+# LEARN: Terraform here only creates the EMPTY hosting container. The site
+# content is uploaded out-of-band by the script, so Terraform neither knows nor
+# cares what is deployed - changing infra never redeploys the SPA.
 resource "aws_amplify_app" "web" {
   name     = "${local.name_prefix}-web"
   platform = "WEB"
@@ -21,6 +25,9 @@ resource "aws_amplify_app" "web" {
   }
 }
 
+# LEARN: Amplify serves each branch at https://<branch>.<default_domain>.
+# Both parts are attributes only known after creation (default_domain is
+# assigned by AWS), which cognito.tf consumes for the callback URLs.
 resource "aws_amplify_branch" "mvp" {
   app_id      = aws_amplify_app.web.id
   branch_name = "mvp"

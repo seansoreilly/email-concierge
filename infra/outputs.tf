@@ -1,5 +1,12 @@
 # Consumed in Phase 3 by aws_amplify_app.environment_variables (VITE_* build-
 # time vars for the SPA) and by scripts/oauth-bootstrap.ts (Phase 4).
+#
+# LEARN: `output` blocks do two jobs: they print after every apply, and they
+# are the only values scripts can read later with `terraform output -raw <name>`
+# (scripts/deploy-web.sh does exactly this for the Cognito IDs and API URL).
+# Outputs are how Terraform hands facts to the world outside it. Add
+# `sensitive = true` to hide one from the console. (Inside a module,
+# outputs are instead its return values - see modules/service_lambda/outputs.tf.)
 
 output "cognito_user_pool_id" {
   description = "Cognito user pool ID - feeds VITE_COGNITO_USER_POOL_ID"

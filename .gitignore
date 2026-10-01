@@ -39,3 +39,7 @@ coverage/
 
 # Logs
 *.log
+
+# Backups / Python bytecode
+*.json.bak
+__pycache__/

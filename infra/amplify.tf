@@ -19,18 +19,10 @@ resource "aws_amplify_app" "web" {
     target = "/index.html"
     status = "200"
   }
-
-  tags = {
-    Name = "${local.name_prefix}-web"
-  }
 }
 
 resource "aws_amplify_branch" "mvp" {
   app_id      = aws_amplify_app.web.id
   branch_name = "mvp"
   stage       = "PRODUCTION"
-
-  tags = {
-    Name = "${local.name_prefix}-web-mvp-branch"
-  }
 }

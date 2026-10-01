@@ -142,7 +142,7 @@ must run before `terraform plan`/`apply` picks up a code change.
   `draft-lambda` via `scripts/oauth-bootstrap.ts`) for Gmail API access, and a separate **Web
   application** client (`google_oauth_client_id`/`google_oauth_client_secret` Terraform vars) used
   only for the web UI's "Sign in with Google" button via Cognito Hosted UI
-  (`infra/cognito_google_restrict.tf` restricts that login to the single configured user). Email/
+  (`infra/cognito_pre_signup.tf` restricts that login to the single configured user). Email/
   password (Cognito SRP) sign-in is independent of both and always works.
 - Local web dev must bind to `http://localhost:5173/`, not `127.0.0.1` — Cognito's callback
   allowlist treats `localhost` as its one http exception. On WSL2 this means `vite --host

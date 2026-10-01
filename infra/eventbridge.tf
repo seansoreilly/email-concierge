@@ -16,7 +16,7 @@ resource "aws_scheduler_schedule" "poll_lambda" {
   schedule_expression = "rate(2 minutes)"
 
   target {
-    arn      = aws_lambda_function.poll.arn
+    arn      = module.poll.arn
     role_arn = aws_iam_role.scheduler_invoke.arn
   }
 }
@@ -24,35 +24,31 @@ resource "aws_scheduler_schedule" "poll_lambda" {
 # EventBridge Scheduler invokes the Lambda directly via this execution role
 # (not a resource-based aws_lambda_permission, which is how the legacy
 # CloudWatch Events rule model works).
-resource "aws_iam_role" "scheduler_invoke" {
-  name = "${local.iam_name_prefix}-scheduler-invoke-role"
+data "aws_iam_policy_document" "scheduler_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "scheduler.amazonaws.com"
-      }
-      Action = "sts:AssumeRole"
-    }]
-  })
-
-  tags = {
-    Name = "${local.name_prefix}-scheduler-invoke-role"
+    principals {
+      type        = "Service"
+      identifiers = ["scheduler.amazonaws.com"]
+    }
   }
 }
 
-resource "aws_iam_role_policy" "scheduler_invoke" {
-  name = "${local.name_prefix}-scheduler-invoke-policy"
-  role = aws_iam_role.scheduler_invoke.id
+data "aws_iam_policy_document" "scheduler_invoke" {
+  statement {
+    actions   = ["lambda:InvokeFunction"]
+    resources = [module.poll.arn]
+  }
+}
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = "lambda:InvokeFunction"
-      Resource = aws_lambda_function.poll.arn
-    }]
-  })
+resource "aws_iam_role" "scheduler_invoke" {
+  name               = "${local.iam_name_prefix}-scheduler-invoke-role"
+  assume_role_policy = data.aws_iam_policy_document.scheduler_assume_role.json
+}
+
+resource "aws_iam_role_policy" "scheduler_invoke" {
+  name   = "${local.name_prefix}-scheduler-invoke-policy"
+  role   = aws_iam_role.scheduler_invoke.id
+  policy = data.aws_iam_policy_document.scheduler_invoke.json
 }

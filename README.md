@@ -248,7 +248,7 @@ UI. Email/password sign-in (Cognito SRP) keeps working either way — this is an
 not a replacement, so a break here never locks you out.
 
 Sign-in is restricted to the single Cognito user (`var.cognito_user_email`) by a Pre Sign-up
-Lambda trigger (`infra/cognito_google_restrict.tf`): any other Google account is rejected before
+Lambda trigger (`infra/cognito_pre_signup.tf`): any other Google account is rejected before
 a session is issued, and a matching one is linked to the existing user rather than provisioning a
 new one — the app stays single-user even with Google federation enabled.
 

@@ -22,9 +22,6 @@ locals {
     gmail_oauth = "${local.name_prefix}/gmail-oauth"
   }
 
-  lambda_runtime = "nodejs22.x"
-  lambda_handler = "index.handler"
-
   # Each Lambda's package.json "build" script must emit exactly this path via esbuild -
   # infra's data.archive_file zips it, so the path is a hard contract between infra/ and services/.
   lambda_dist_path = {

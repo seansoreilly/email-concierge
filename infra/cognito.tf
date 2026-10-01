@@ -28,11 +28,7 @@ resource "aws_cognito_user_pool" "main" {
   # restrict-and-link Lambda. SRP sign-in (email/password) is unaffected -
   # this trigger only fires for PreSignUp_ExternalProvider.
   lambda_config {
-    pre_sign_up = aws_lambda_function.cognito_pre_signup.arn
-  }
-
-  tags = {
-    Name = "${local.name_prefix}-users"
+    pre_sign_up = module.cognito_pre_signup.arn
   }
 }
 
@@ -94,8 +90,8 @@ resource "aws_cognito_user_pool_domain" "main" {
 
 # Google as a federated IdP. attribute_mapping.username maps Google's `sub`
 # to the Cognito federated username (Google_<sub>) - this is NOT how we
-# restrict sign-in to one user; that's enforced by the pre_sign_up_restrict
-# Lambda trigger below, since Cognito auto-provisions a federated user by
+# restrict sign-in to one user; that's enforced by the pre-sign-up
+# Lambda trigger (cognito_pre_signup.tf), since Cognito auto-provisions a federated user by
 # default regardless of admin_create_user_only.
 resource "aws_cognito_identity_provider" "google" {
   user_pool_id  = aws_cognito_user_pool.main.id

@@ -9,7 +9,7 @@ resource "aws_cloudwatch_metric_alarm" "poll_lambda_errors" {
   namespace         = "AWS/Lambda"
   metric_name       = "Errors"
   dimensions = {
-    FunctionName = aws_lambda_function.poll.function_name
+    FunctionName = module.poll.function_name
   }
   statistic           = "Sum"
   period              = 600
@@ -17,8 +17,4 @@ resource "aws_cloudwatch_metric_alarm" "poll_lambda_errors" {
   threshold           = 3
   comparison_operator = "GreaterThanOrEqualToThreshold"
   treat_missing_data  = "notBreaching"
-
-  tags = {
-    Name = "${local.name_prefix}-poll-lambda-errors"
-  }
 }

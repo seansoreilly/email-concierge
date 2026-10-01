@@ -34,18 +34,18 @@ output "dynamodb_sync_state_table_name" {
 output "lambda_function_names" {
   description = "Lambda function names, by role"
   value = {
-    poll  = aws_lambda_function.poll.function_name
-    draft = aws_lambda_function.draft.function_name
-    api   = aws_lambda_function.api.function_name
+    poll  = module.poll.function_name
+    draft = module.draft.function_name
+    api   = module.api.function_name
   }
 }
 
 output "lambda_function_arns" {
   description = "Lambda function ARNs, by role"
   value = {
-    poll  = aws_lambda_function.poll.arn
-    draft = aws_lambda_function.draft.arn
-    api   = aws_lambda_function.api.arn
+    poll  = module.poll.arn
+    draft = module.draft.arn
+    api   = module.api.arn
   }
 }
 

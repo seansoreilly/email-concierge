@@ -1,80 +1,47 @@
 # Each Lambda's dist/index.mjs is produced by the sibling service's esbuild
 # build script at the path in local.lambda_dist_path (the hard contract with
-# services/*-lambda). Terraform owns zipping + the source hash so the build
+# services/*-lambda). The module owns zipping + the source hash so the build
 # script only needs to emit the .mjs, not a zip.
-data "archive_file" "poll" {
-  type        = "zip"
-  source_file = local.lambda_dist_path.poll
-  output_path = "${path.module}/../services/poll-lambda/dist/lambda.zip"
+
+locals {
+  dynamodb_rw_actions = [
+    "dynamodb:GetItem",
+    "dynamodb:PutItem",
+    "dynamodb:UpdateItem",
+    "dynamodb:Query",
+    "dynamodb:Scan",
+  ]
 }
 
-data "archive_file" "draft" {
-  type        = "zip"
-  source_file = local.lambda_dist_path.draft
-  output_path = "${path.module}/../services/draft-lambda/dist/lambda.zip"
-}
-
-data "archive_file" "api" {
-  type        = "zip"
-  source_file = local.lambda_dist_path.api
-  output_path = "${path.module}/../services/api-lambda/dist/lambda.zip"
+data "aws_iam_policy_document" "gmail_secret_read" {
+  statement {
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [aws_secretsmanager_secret.gmail_oauth.arn]
+  }
 }
 
 # ---------------------------------------------------------------------------
 # poll-lambda: reads/writes emails + sync_state, reads Gmail OAuth secret.
 # ---------------------------------------------------------------------------
-resource "aws_iam_role" "poll" {
-  name               = "${local.iam_name_prefix}-poll-lambda-role"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+data "aws_iam_policy_document" "poll" {
+  source_policy_documents = [data.aws_iam_policy_document.gmail_secret_read.json]
 
-  tags = {
-    Name = "${local.lambda_names.poll}-role"
+  statement {
+    actions = local.dynamodb_rw_actions
+    resources = [
+      aws_dynamodb_table.emails.arn,
+      aws_dynamodb_table.sync_state.arn,
+    ]
   }
 }
 
-resource "aws_iam_role_policy_attachment" "poll_basic_execution" {
-  role       = aws_iam_role.poll.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
+module "poll" {
+  source = "./modules/service_lambda"
 
-resource "aws_iam_role_policy" "poll" {
-  name = "${local.lambda_names.poll}-policy"
-  role = aws_iam_role.poll.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "dynamodb:GetItem",
-          "dynamodb:PutItem",
-          "dynamodb:UpdateItem",
-          "dynamodb:Query",
-          "dynamodb:Scan",
-        ]
-        Resource = [
-          aws_dynamodb_table.emails.arn,
-          aws_dynamodb_table.sync_state.arn,
-        ]
-      },
-      {
-        Effect   = "Allow"
-        Action   = "secretsmanager:GetSecretValue"
-        Resource = aws_secretsmanager_secret.gmail_oauth.arn
-      },
-    ]
-  })
-}
-
-resource "aws_lambda_function" "poll" {
   function_name = local.lambda_names.poll
-  role          = aws_iam_role.poll.arn
-  runtime       = local.lambda_runtime
-  handler       = local.lambda_handler
-
-  filename         = data.archive_file.poll.output_path
-  source_code_hash = data.archive_file.poll.output_base64sha256
+  role_name     = "${local.iam_name_prefix}-poll-lambda-role"
+  source_file   = local.lambda_dist_path.poll
+  policy_json   = data.aws_iam_policy_document.poll.json
 
   # 300s (not the earlier 90s) - a first-run 7-day backfill processes up to
   # ~20 messages per invocation (get + classify + batchModify each), which
@@ -84,19 +51,13 @@ resource "aws_lambda_function" "poll" {
 
   reserved_concurrent_executions = 1
 
-  environment {
-    variables = {
-      EMAILS_TABLE_NAME      = aws_dynamodb_table.emails.name
-      SYNC_STATE_TABLE_NAME  = aws_dynamodb_table.sync_state.name
-      GMAIL_OAUTH_SECRET_ARN = aws_secretsmanager_secret.gmail_oauth.arn
-      ANTHROPIC_API_KEY      = var.anthropic_api_key
-      OPENROUTER_API_KEY     = var.openrouter_api_key
-      ARCHIVE_ENABLED        = tostring(var.archive_enabled)
-    }
-  }
-
-  tags = {
-    Name = local.lambda_names.poll
+  environment = {
+    EMAILS_TABLE_NAME      = aws_dynamodb_table.emails.name
+    SYNC_STATE_TABLE_NAME  = aws_dynamodb_table.sync_state.name
+    GMAIL_OAUTH_SECRET_ARN = aws_secretsmanager_secret.gmail_oauth.arn
+    ANTHROPIC_API_KEY      = var.anthropic_api_key
+    OPENROUTER_API_KEY     = var.openrouter_api_key
+    ARCHIVE_ENABLED        = tostring(var.archive_enabled)
   }
 }
 
@@ -104,80 +65,41 @@ resource "aws_lambda_function" "poll" {
 # draft-lambda: reads/writes emails table, consumes its DynamoDB Stream,
 # reads Gmail OAuth secret (to create the Gmail draft via the API).
 # ---------------------------------------------------------------------------
-resource "aws_iam_role" "draft" {
-  name               = "${local.iam_name_prefix}-draft-lambda-role"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+data "aws_iam_policy_document" "draft" {
+  source_policy_documents = [data.aws_iam_policy_document.gmail_secret_read.json]
 
-  tags = {
-    Name = "${local.lambda_names.draft}-role"
+  statement {
+    actions   = local.dynamodb_rw_actions
+    resources = [aws_dynamodb_table.emails.arn]
+  }
+
+  statement {
+    actions = [
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:DescribeStream",
+      "dynamodb:ListStreams",
+    ]
+    resources = ["${aws_dynamodb_table.emails.arn}/stream/*"]
   }
 }
 
-resource "aws_iam_role_policy_attachment" "draft_basic_execution" {
-  role       = aws_iam_role.draft.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
+module "draft" {
+  source = "./modules/service_lambda"
 
-resource "aws_iam_role_policy" "draft" {
-  name = "${local.lambda_names.draft}-policy"
-  role = aws_iam_role.draft.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "dynamodb:GetItem",
-          "dynamodb:PutItem",
-          "dynamodb:UpdateItem",
-          "dynamodb:Query",
-          "dynamodb:Scan",
-        ]
-        Resource = aws_dynamodb_table.emails.arn
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "dynamodb:GetRecords",
-          "dynamodb:GetShardIterator",
-          "dynamodb:DescribeStream",
-          "dynamodb:ListStreams",
-        ]
-        Resource = "${aws_dynamodb_table.emails.arn}/stream/*"
-      },
-      {
-        Effect   = "Allow"
-        Action   = "secretsmanager:GetSecretValue"
-        Resource = aws_secretsmanager_secret.gmail_oauth.arn
-      },
-    ]
-  })
-}
-
-resource "aws_lambda_function" "draft" {
   function_name = local.lambda_names.draft
-  role          = aws_iam_role.draft.arn
-  runtime       = local.lambda_runtime
-  handler       = local.lambda_handler
-
-  filename         = data.archive_file.draft.output_path
-  source_code_hash = data.archive_file.draft.output_base64sha256
+  role_name     = "${local.iam_name_prefix}-draft-lambda-role"
+  source_file   = local.lambda_dist_path.draft
+  policy_json   = data.aws_iam_policy_document.draft.json
 
   timeout     = 90
   memory_size = 512
 
-  environment {
-    variables = {
-      EMAILS_TABLE_NAME      = aws_dynamodb_table.emails.name
-      GMAIL_OAUTH_SECRET_ARN = aws_secretsmanager_secret.gmail_oauth.arn
-      ANTHROPIC_API_KEY      = var.anthropic_api_key
-      OPENROUTER_API_KEY     = var.openrouter_api_key
-    }
-  }
-
-  tags = {
-    Name = local.lambda_names.draft
+  environment = {
+    EMAILS_TABLE_NAME      = aws_dynamodb_table.emails.name
+    GMAIL_OAUTH_SECRET_ARN = aws_secretsmanager_secret.gmail_oauth.arn
+    ANTHROPIC_API_KEY      = var.anthropic_api_key
+    OPENROUTER_API_KEY     = var.openrouter_api_key
   }
 }
 
@@ -200,7 +122,7 @@ resource "aws_lambda_function" "draft" {
 # silently drop those records) - see services/draft-lambda's handler.
 resource "aws_lambda_event_source_mapping" "emails_stream_to_draft" {
   event_source_arn  = aws_dynamodb_table.emails.stream_arn
-  function_name     = aws_lambda_function.draft.arn
+  function_name     = module.draft.arn
   starting_position = "LATEST"
 
   # Without this, Lambda ignores draft-lambda's batchItemFailures return
@@ -233,88 +155,90 @@ resource "aws_lambda_event_source_mapping" "emails_stream_to_draft" {
     }
   }
 
-  depends_on = [aws_iam_role_policy.draft]
+  # The stream-read permissions live in the module's inline policy; the
+  # mapping fails to create if they aren't attached yet.
+  depends_on = [module.draft]
 }
 
 # ---------------------------------------------------------------------------
 # api-lambda: reads/writes emails table (list + corrections), reads Gmail
 # OAuth secret (corrections may call back to Gmail to relabel/undo a draft).
 # ---------------------------------------------------------------------------
-resource "aws_iam_role" "api" {
-  name               = "${local.iam_name_prefix}-api-lambda-role"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+data "aws_iam_policy_document" "api" {
+  source_policy_documents = [data.aws_iam_policy_document.gmail_secret_read.json]
 
-  tags = {
-    Name = "${local.lambda_names.api}-role"
+  statement {
+    actions   = local.dynamodb_rw_actions
+    resources = [aws_dynamodb_table.emails.arn]
   }
 }
 
-resource "aws_iam_role_policy_attachment" "api_basic_execution" {
-  role       = aws_iam_role.api.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
+module "api" {
+  source = "./modules/service_lambda"
 
-resource "aws_iam_role_policy" "api" {
-  name = "${local.lambda_names.api}-policy"
-  role = aws_iam_role.api.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "dynamodb:GetItem",
-          "dynamodb:PutItem",
-          "dynamodb:UpdateItem",
-          "dynamodb:Query",
-          "dynamodb:Scan",
-        ]
-        Resource = aws_dynamodb_table.emails.arn
-      },
-      {
-        Effect   = "Allow"
-        Action   = "secretsmanager:GetSecretValue"
-        Resource = aws_secretsmanager_secret.gmail_oauth.arn
-      },
-    ]
-  })
-}
-
-resource "aws_lambda_function" "api" {
   function_name = local.lambda_names.api
-  role          = aws_iam_role.api.arn
-  runtime       = local.lambda_runtime
-  handler       = local.lambda_handler
-
-  filename         = data.archive_file.api.output_path
-  source_code_hash = data.archive_file.api.output_base64sha256
+  role_name     = "${local.iam_name_prefix}-api-lambda-role"
+  source_file   = local.lambda_dist_path.api
+  policy_json   = data.aws_iam_policy_document.api.json
 
   timeout     = 30
   memory_size = 256
 
-  environment {
-    variables = {
-      EMAILS_TABLE_NAME      = aws_dynamodb_table.emails.name
-      GMAIL_OAUTH_SECRET_ARN = aws_secretsmanager_secret.gmail_oauth.arn
-    }
-  }
-
-  tags = {
-    Name = local.lambda_names.api
+  environment = {
+    EMAILS_TABLE_NAME      = aws_dynamodb_table.emails.name
+    GMAIL_OAUTH_SECRET_ARN = aws_secretsmanager_secret.gmail_oauth.arn
   }
 }
 
-# Shared assume-role policy document (identical trust policy for all three
-# Lambda execution roles - Lambda is always the assuming service).
-data "aws_iam_policy_document" "lambda_assume_role" {
-  statement {
-    effect  = "Allow"
-    actions = ["sts:AssumeRole"]
+# Resource addresses moved into modules - keeps the single live state from
+# destroying/recreating the roles and functions.
+moved {
+  from = aws_iam_role.poll
+  to   = module.poll.aws_iam_role.this
+}
+moved {
+  from = aws_iam_role_policy_attachment.poll_basic_execution
+  to   = module.poll.aws_iam_role_policy_attachment.basic_execution
+}
+moved {
+  from = aws_iam_role_policy.poll
+  to   = module.poll.aws_iam_role_policy.this
+}
+moved {
+  from = aws_lambda_function.poll
+  to   = module.poll.aws_lambda_function.this
+}
 
-    principals {
-      type        = "Service"
-      identifiers = ["lambda.amazonaws.com"]
-    }
-  }
+moved {
+  from = aws_iam_role.draft
+  to   = module.draft.aws_iam_role.this
+}
+moved {
+  from = aws_iam_role_policy_attachment.draft_basic_execution
+  to   = module.draft.aws_iam_role_policy_attachment.basic_execution
+}
+moved {
+  from = aws_iam_role_policy.draft
+  to   = module.draft.aws_iam_role_policy.this
+}
+moved {
+  from = aws_lambda_function.draft
+  to   = module.draft.aws_lambda_function.this
+}
+
+moved {
+  from = aws_iam_role.api
+  to   = module.api.aws_iam_role.this
+}
+moved {
+  from = aws_iam_role_policy_attachment.api_basic_execution
+  to   = module.api.aws_iam_role_policy_attachment.basic_execution
+}
+moved {
+  from = aws_iam_role_policy.api
+  to   = module.api.aws_iam_role_policy.this
+}
+moved {
+  from = aws_lambda_function.api
+  to   = module.api.aws_lambda_function.this
 }
